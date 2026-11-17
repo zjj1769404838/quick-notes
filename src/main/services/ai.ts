@@ -60,7 +60,7 @@ export const MODELS: ModelSpec[] = [
   {
     id: 'nomic-embed-v15-q4km',
     file: 'nomic-embed-text-v1.5.Q4_K_M.gguf',
-    bytes: 84 * 1024 * 1024,
+    bytes: 84106624,
     repo: 'nomic-ai/nomic-embed-text-v1.5-GGUF',
     kind: 'embed',
     tier: 'base'
@@ -146,20 +146,41 @@ export class AiService {
 
   /* ============ 模型文件管理 ============ */
 
+  /** 内置模型目录（完整版随包带在 resources/models，由 extraResources 放置） */
+  private bundledModelsDir(): string {
+    try {
+      const rp = process.resourcesPath
+      if (rp) return path.join(rp, 'models')
+    } catch {
+      /* 开发模式无 resourcesPath */
+    }
+    return ''
+  }
+
+  /** 解析模型实际路径：内置优先 → 已下载到 LOCALAPPDATA → 都没有则返回下载目标路径 */
+  private resolveModelFile(id: ModelId): { path: string; source: 'bundled' | 'downloaded' | 'missing' } {
+    const spec = MODELS.find((m) => m.id === id)!
+    // 1) 内置（完整版）
+    const bundled = this.bundledModelsDir()
+    if (bundled) {
+      const p = path.join(bundled, id, spec.file)
+      if (existsSync(p) && statSync(p).size === spec.bytes) return { path: p, source: 'bundled' }
+    }
+    // 2) 已下载
+    const dl = path.join(this.modelDir(id), spec.file)
+    if (existsSync(dl) && statSync(dl).size === spec.bytes) return { path: dl, source: 'downloaded' }
+    // 3) 缺失：给下载目标路径，调用方据此展示
+    return { path: dl, source: 'missing' }
+  }
+
   private modelDir(id: ModelId): string {
     return path.join(this.modelRoot, id)
   }
 
   modelStatus(id: ModelId): ModelStatus {
-    const spec = MODELS.find((m) => m.id === id)!
-    const p = path.join(this.modelDir(id), spec.file)
-    let bytes = 0
-    try {
-      if (existsSync(p)) bytes = statSync(p).size
-    } catch {
-      bytes = 0
-    }
-    return { modelId: id, installed: bytes === spec.bytes, bytes, path: p }
+    const r = this.resolveModelFile(id)
+    const bytes = r.source === 'missing' ? 0 : statSync(r.path).size
+    return { modelId: id, installed: r.source !== 'missing', bytes, path: r.path }
   }
 
   private async loadLock(): Promise<Record<string, string> | null> {
@@ -337,7 +358,6 @@ export class AiService {
     if (!st.installed) {
       throw Object.assign(new Error('模型尚未下载'), { code: ErrorCode.E_MODEL_MISSING })
     }
-
     // 延迟加载推理库：只有真正要用 AI 时才 import（NFR-2 内存预算）
     const mod = (await import('node-llama-cpp')) as typeof import('node-llama-cpp')
     const getLlama = mod.getLlama
@@ -355,8 +375,7 @@ export class AiService {
   }
 
   /** 卸载模型，归还内存（AI 关闭时调用） */
-  async unload(): Promise<void> {
-    try {
+  async unload(): Promise<void> {    try {
       const m = this.model as { dispose?: () => Promise<void> } | null
       if (m?.dispose) await m.dispose()
     } catch {
@@ -383,52 +402,86 @@ export class AiService {
     this.activeRuns.set(runId, state)
 
     void (async () => {
+      let context: { getSequence: () => unknown; dispose: () => Promise<void> } | null = null
       try {
         const params = GEN_PARAMS[req.task] ?? { temperature: 0.3, maxTokens: 512 }
         const model = (await this.ensureLoaded(tier)) as {
           createContext: (o: { contextSize: number }) => Promise<{
-            getSequence: () => {
-              prompt: (p: string) => Promise<unknown>
-              repeatPenalty: (o: unknown) => void
-            }
+            getSequence: () => unknown
             dispose: () => Promise<void>
           }>
         }
-        const context = await model.createContext({ contextSize: 4096 })
-        const seq = context.getSequence()
+        context = await model.createContext({ contextSize: 4096 })
+
+        // 实测验证过的用法：LlamaChatSession + systemPrompt + /no_think。
+        // Qwen3 默认开 thinking 会把 token 全耗在推理上导致输出为空，
+        // 因此 systemPrompt 强制「直接回答」并在 user 末尾加 /no_think。
+        const mod = (await import('node-llama-cpp')) as unknown as {
+          LlamaChatSession: new (o: { contextSequence: unknown; systemPrompt?: string }) => {
+            prompt: (
+              text: string,
+              opts: {
+                maxTokens?: number
+                temperature?: number
+                signal?: AbortSignal
+                onTextChunk?: (chunk: string) => void
+              }
+            ) => Promise<string>
+          }
+        }
+        const session = new mod.LlamaChatSession({
+          contextSequence: context.getSequence(),
+          systemPrompt:
+            '你是中文笔记助手。直接给出结果，不要解释过程，不要输出思考内容，不要重复原句之外的说明。'
+        })
+
+        const abort = new AbortController()
+        const cancelWatch = setInterval(() => {
+          if (state.cancelled) abort.abort()
+        }, 120)
+
         const prompt = PROMPTS[req.task]({
           text: req.text,
           before: req.contextBefore,
           after: req.contextAfter
         })
-        await seq.prompt(prompt)
 
-        // node-llama-cpp 的流式 API 名称随版本变化，这里用最稳的一次性返回 + 分片回放，
-        // 保证接口形状稳定；后续可切换到真正的 token 级流式。
-        // 采样参数来自 GEN_PARAMS（temperature / maxTokens），确保各任务输出风格可控。
-        const full = await (seq as unknown as { completedText?: string }).completedText
-        const raw = typeof full === 'string' ? full : ''
-        const text = raw.trim().slice(0, params.maxTokens * 4)
-        void params.temperature
         let seqNo = 0
-        for (let i = 0; i < text.length; i += 24) {
-          if (state.cancelled) break
-          this.events.onStream({ runId, seq: seqNo++, delta: text.slice(i, i + 24), done: false })
+        let acc = ''
+        const text = await session.prompt(`${prompt} /no_think`, {
+          maxTokens: params.maxTokens,
+          temperature: params.temperature,
+          signal: abort.signal,
+          onTextChunk: (chunk: string) => {
+            acc += chunk
+            this.events.onStream({ runId, seq: seqNo++, delta: chunk, done: false })
+          }
+        })
+        clearInterval(cancelWatch)
+
+        // 若流式没触发（某些后端一次性返回），兜底把整段发出去
+        if (acc.length === 0 && text.length > 0) {
+          this.events.onStream({ runId, seq: seqNo++, delta: text, done: false })
         }
         this.events.onStream({ runId, seq: seqNo, delta: '', done: true })
-        await context.dispose()
       } catch (e) {
+        const code = (e as { code?: string }).code
+        const aborted = state.cancelled || abortLike(e)
         this.events.onStream({
           runId,
           seq: 0,
           delta: '',
           done: true,
-          error: {
-            code: (e as { code?: string }).code ?? ErrorCode.E_UNKNOWN,
-            message: (e as Error).message
-          }
+          error: aborted
+            ? { code: ErrorCode.E_CANCELLED, message: '已中止' }
+            : { code: code ?? ErrorCode.E_UNKNOWN, message: (e as Error).message }
         })
       } finally {
+        try {
+          if (context) await context.dispose()
+        } catch {
+          /* 忽略 */
+        }
         this.activeRuns.delete(runId)
       }
     })()
@@ -441,11 +494,80 @@ export class AiService {
     if (s) s.cancelled = true
   }
 
+  /* ============ Embedding（语义检索用） ============ */
+
+  private embeddingModel: unknown = null
+  private embeddingCtx: unknown = null
+
+  /** embedding 模型是否已就绪（文件存在且已加载） */
+  embeddingReady(): boolean {
+    return this.modelStatus('nomic-embed-v15-q4km').installed
+  }
+
+  /**
+   * 生成一段文本的 embedding 向量。
+   * 懒加载 embedding 模型与 context；失败时抛错，由调用方降级为纯全文检索。
+   */
+  async embed(text: string): Promise<Float32Array> {
+    const spec = MODELS.find((m) => m.id === 'nomic-embed-v15-q4km')!
+    const st = this.modelStatus(spec.id)
+    if (!st.installed) {
+      throw Object.assign(new Error('embedding 模型尚未下载'), { code: ErrorCode.E_MODEL_MISSING })
+    }
+    if (!this.embeddingCtx) {
+      const mod = (await import('node-llama-cpp')) as typeof import('node-llama-cpp')
+      if (!this.llama) {
+        this.llama = await mod.getLlama({ gpu: false })
+      }
+      const llama = this.llama as {
+        loadModel: (o: { modelPath: string }) => Promise<unknown>
+      }
+      if (!this.embeddingModel) {
+        this.embeddingModel = await llama.loadModel({ modelPath: st.path })
+      }
+      // 实测：createEmbeddingContext 在 model 上，不在 llama 上
+      const m = this.embeddingModel as { createEmbeddingContext: () => Promise<unknown> }
+      this.embeddingCtx = await m.createEmbeddingContext()
+    }
+    const ctx = this.embeddingCtx as {
+      getEmbeddingFor: (input: string) => Promise<{ vector: number[] | Float32Array }>
+    }
+    // nomic-embed 需要任务前缀才能正确区分语义方向（实测：不加前缀时中文短句排序会失真）
+    const emb = await ctx.getEmbeddingFor(`search_document: ${text}`)
+    const src = emb.vector
+    return src instanceof Float32Array ? src : Float32Array.from(src)
+  }
+
+  /** 释放 embedding 资源 */
+  async releaseEmbedding(): Promise<void> {
+    try {
+      const c = this.embeddingCtx as { dispose?: () => Promise<void> } | null
+      if (c?.dispose) await c.dispose()
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      const m = this.embeddingModel as { dispose?: () => Promise<void> } | null
+      if (m?.dispose) await m.dispose()
+    } catch {
+      /* 忽略 */
+    }
+    this.embeddingCtx = null
+    this.embeddingModel = null
+  }
+
   async dispose(): Promise<void> {
     for (const s of this.activeRuns.values()) s.cancelled = true
     for (const d of this.downloading.values()) d.abort.abort()
     await this.unload()
   }
+}
+
+/** 判断异常是否来自中止（AbortController） */
+function abortLike(e: unknown): boolean {
+  const name = (e as { name?: string })?.name ?? ''
+  const msg = String((e as { message?: string })?.message ?? '')
+  return name === 'AbortError' || /abort/i.test(msg)
 }
 
 function sha256File(p: string): Promise<string> {

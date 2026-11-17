@@ -13,6 +13,7 @@ import type {
   IpcResult,
   ModelId,
   SearchResult,
+  SearchHit,
   SystemInfo
 } from '../shared/types.js'
 import { ErrorCode } from '../shared/types.js'
@@ -21,6 +22,7 @@ import { NoteService } from './services/notes.js'
 import { IndexService } from './services/index.js'
 import { AiService } from './services/ai.js'
 import { WindowService } from './services/windows.js'
+import { SemanticIndex } from './services/semantic.js'
 import { bootLog } from './services/logger.js'
 
 const DEV_URL = process.env.ELECTRON_RENDERER_URL ?? null
@@ -41,6 +43,7 @@ if (!gotLock) {
 const cfgSvc = new ConfigService()
 let noteSvc: NoteService
 let indexSvc: IndexService
+let semanticSvc: SemanticIndex
 let aiSvc: AiService
 let winSvc: WindowService
 let tray: Tray | null = null
@@ -275,9 +278,33 @@ function registerIpc(): void {
   /* --- 搜索 / 索引 / 标签 --- */
   handle(IPC.searchQuery, async (q: string, limit?: number) => {
     const t0 = Date.now()
-    const max = limit ?? cfgSvc.current().search.maxResults
+    const cfgNow = cfgSvc.current()
+    const max = limit ?? cfgNow.search.maxResults
     const lexical = indexSvc.query(q, max)
-    const result: SearchResult = { query: q, lexical, semantic: [], tookMs: Date.now() - t0 }
+
+    // 语义检索：仅在 AI 开启 + 语义开关 + 模型就绪时尝试；任何失败都静默降级为纯全文
+    let semantic: SearchHit[] = []
+    if (cfgNow.ai.enabled && cfgNow.ai.semanticEnabled && semanticSvc.available) {
+      try {
+        semantic = await semanticSvc.query(q, max, cfgNow.ai.semanticThreshold)
+      } catch {
+        semantic = []
+      }
+    }
+
+    // 两路都有结果时按 RRF k=60 融合，"相关"页展示融合排序里的语义贡献项
+    const merged = semantic.length && lexical.length
+      ? SemanticIndex.fuse(lexical, semantic, max)
+      : lexical.length
+        ? lexical
+        : semantic
+
+    const result: SearchResult = {
+      query: q,
+      lexical,
+      semantic: merged.filter((h) => semantic.some((s) => s.relPath === h.relPath)).slice(0, max),
+      tookMs: Date.now() - t0
+    }
     return result
   })
   handle(IPC.indexRebuild, async () => {
@@ -286,6 +313,36 @@ function registerIpc(): void {
   })
   handle(IPC.indexStatus, () => indexSvc.status)
   handle(IPC.tagsList, () => indexSvc.allTags())
+
+  /* --- 语义索引 --- */
+  handle('semantic:status', () => ({
+    available: semanticSvc.available,
+    ...semanticSvc.status
+  }))
+  handle('semantic:rebuild', async () => {
+    const cfgNow = cfgSvc.current()
+    if (!cfgNow.ai.enabled) throw Object.assign(new Error('本地 AI 已关闭'), { code: ErrorCode.E_AI_DISABLED })
+    if (!aiSvc.embeddingReady()) {
+      throw Object.assign(new Error('embedding 模型尚未下载'), { code: ErrorCode.E_MODEL_MISSING })
+    }
+    // 把 embedder 注入语义索引
+    semanticSvc.setEmbedder({ embed: (t) => aiSvc.embed(t) })
+    const metas = await noteSvc.scanAll()
+    const notes: Array<{ relPath: string; body: string; mtimeMs: number }> = []
+    for (const m of metas) {
+      try {
+        const c = await noteSvc.read(m.relPath)
+        notes.push({ relPath: m.relPath, body: c.body, mtimeMs: m.mtimeMs })
+      } catch {
+        /* 跳过读失败的文件 */
+      }
+    }
+    return semanticSvc.rebuild(notes, cfgNow.ai.tier === '1.5b' ? 'qwen2.5-1.5b' : 'qwen3-0.6b')
+  })
+  handle('semantic:clear', async () => {
+    await semanticSvc.clear()
+    return true
+  })
 
   /* --- 设置 --- */
   handle(IPC.configGet, () => cfgSvc.current())
@@ -414,6 +471,7 @@ app.whenReady().then(async () => {
 
   noteSvc = new NoteService(cfg.noteRoot)
   indexSvc = new IndexService(cfg.noteRoot, indexDir())
+  semanticSvc = new SemanticIndex(cfg.noteRoot, indexDir())
   winSvc = new WindowService(cfgSvc, DEV_URL)
   aiSvc = new AiService(modelRoot(), {
     onStream: (chunk) => {

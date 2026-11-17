@@ -27,12 +27,8 @@ asarUnpack:
   - '**/*.node'
   - '**/ggml-*.dll'
   - '**/llama-*.dll'
-# 精简版不带模型；完整版把 0.6B 打进 resources/models
-extraResources:
-  - from: resources/models
-    to: models
-    filter:
-      - '**/*'
+# 注意：模型通过 extraResources 显式注入，见 scripts/build.mjs 的 edition 切换。
+# 精简版不去下载模型；完整版由 QN_EDITION=full 触发 include 大文件。
 win:
   target:
     - target: nsis

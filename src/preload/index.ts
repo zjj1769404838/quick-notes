@@ -60,7 +60,10 @@ const api = {
     query: (q: string, limit?: number) => invoke<SearchResult>(IPC.searchQuery, q, limit),
     rebuild: () => invoke<{ docs: number; tookMs: number }>(IPC.indexRebuild),
     status: () => invoke<{ ready: boolean; docs: number; lastBuiltAt: number; building: boolean }>(IPC.indexStatus),
-    tags: () => invoke<Array<{ tag: string; count: number }>>(IPC.tagsList)
+    tags: () => invoke<Array<{ tag: string; count: number }>>(IPC.tagsList),
+    semanticStatus: () => invoke<{ available: boolean; ready: boolean; chunks: number; builtAt: number; building: boolean }>('semantic:status'),
+    semanticRebuild: () => invoke<{ chunks: number; tookMs: number }>('semantic:rebuild'),
+    semanticClear: () => invoke<boolean>('semantic:clear')
   },
   config: {
     get: () => invoke<AppConfig>(IPC.configGet),

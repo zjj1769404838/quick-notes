@@ -17,6 +17,7 @@ export function SettingsPanel({ cfg, onClose, onChange, pushToast, onTagClick }:
   const [progress, setProgress] = useState<Record<string, ModelDownloadProgress>>({})
   const [tags, setTags] = useState<Array<{ tag: string; count: number }>>([])
   const [indexStat, setIndexStat] = useState<{ ready: boolean; docs: number; lastBuiltAt: number; building: boolean } | null>(null)
+  const [semStat, setSemStat] = useState<{ available: boolean; ready: boolean; chunks: number; builtAt: number; building: boolean } | null>(null)
 
   useEffect(() => {
     void (async () => {
@@ -30,6 +31,8 @@ export function SettingsPanel({ cfg, onClose, onChange, pushToast, onTagClick }:
       if (t.ok) setTags(t.data)
       const i = await window.qn.search.status()
       if (i.ok) setIndexStat(i.data)
+      const sm = await window.qn.search.semanticStatus()
+      if (sm.ok) setSemStat(sm.data)
     })()
     return window.qn.events.onModelProgress((p) => {
       setProgress((prev) => ({ ...prev, [p.modelId]: p }))
@@ -318,6 +321,46 @@ export function SettingsPanel({ cfg, onClose, onChange, pushToast, onTagClick }:
               }}
             >
               重建
+            </button>
+          </div>
+        </div>
+        <div className="setting-row">
+          <div className="k">
+            语义索引
+            <small>
+              {semStat
+                ? semStat.ready
+                  ? `${semStat.chunks} 个片段已建向量${semStat.building ? '（重建中…）' : ''}`
+                  : semStat.available
+                    ? '尚未建立，搜索时「相关」页为空'
+                    : '需先启用本地 AI 并下载 embedding 模型（约 84 MB）'
+                : '加载中…'}
+            </small>
+          </div>
+          <div className="v">
+            <button
+              className="btn ghost small"
+              disabled={!cfg.ai.enabled || !semStat?.available}
+              title={
+                !cfg.ai.enabled
+                  ? '先在下方启用本地 AI'
+                  : !semStat?.available
+                    ? '需下载 embedding 模型'
+                    : ''
+              }
+              onClick={async () => {
+                pushToast('info', '开始建立语义索引，首次较慢…')
+                const r = await window.qn.search.semanticRebuild()
+                if (r.ok) {
+                  pushToast('info', `语义索引完成：${r.data.chunks} 个片段，用时 ${Math.round(r.data.tookMs / 1000)} 秒`)
+                  const s = await window.qn.search.semanticStatus()
+                  if (s.ok) setSemStat(s.data)
+                } else {
+                  pushToast('error', `语义索引失败：${r.error.message}`)
+                }
+              }}
+            >
+              建立
             </button>
           </div>
         </div>

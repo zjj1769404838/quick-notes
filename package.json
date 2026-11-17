@@ -11,8 +11,9 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist:lite": "npm run build && cross-env QN_EDITION=lite electron-builder --win --config electron-builder.yml",
-    "dist:full": "npm run build && cross-env QN_EDITION=full electron-builder --win --config electron-builder.yml"
+    "dist:lite": "npm run build && node scripts/build.mjs lite",
+    "dist:full": "npm run build && node scripts/build.mjs full",
+    "fetch-models": "node scripts/fetch-models.mjs"
   },
   "dependencies": {
     "chokidar": "4.0.3",
