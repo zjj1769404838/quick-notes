@@ -1,0 +1,63 @@
+appId: com.quicknotes.app
+productName: QuickNotes
+copyright: 随手笔记 · 本地工具
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/*.ts'
+  # 排除无关平台/后端的原生二进制：CUDA 版 390MB、arm64 12MB，Windows x64 用户用不到
+  - '!node_modules/@node-llama-cpp/win-x64-cuda/**'
+  - '!node_modules/@node-llama-cpp/win-x64-cuda-ext/**'
+  - '!node_modules/@node-llama-cpp/win-arm64/**'
+  - '!node_modules/@node-llama-cpp/mac-*/**'
+  - '!node_modules/@node-llama-cpp/linux-*/**'
+  # node-llama-cpp 自带的多语言文档与测试用例不进包
+  - '!node_modules/node-llama-cpp/**/*.md'
+  - '!node_modules/node-llama-cpp/**/test/**'
+  - '!node_modules/node-llama-cpp/llama/localBuilds/**'
+asar: true
+# node-llama-cpp 的原生 .node 与 ggml DLL 必须解包出 asar，否则运行时报 NoBinaryFoundError
+asarUnpack:
+  - node_modules/node-llama-cpp/**
+  - node_modules/@node-llama-cpp/win-x64/**
+  - '**/*.node'
+  - '**/ggml-*.dll'
+  - '**/llama-*.dll'
+# 精简版不带模型；完整版把 0.6B 打进 resources/models
+extraResources:
+  - from: resources/models
+    to: models
+    filter:
+      - '**/*'
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: build/icon.png
+  # 无代码签名：会触发 SmartScreen「未知发布者」，属已知限制
+  signAndEditExecutable: true
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 随手笔记
+  artifactName: QuickNotes-Setup-${version}-${arch}.${ext}
+  installerLanguages:
+    - zh_CN
+  language: '2052'
+portable:
+  artifactName: QuickNotes-Portable-${version}-${arch}.${ext}
+compression: maximum
+electronLanguages:
+  - zh-CN
+  - en-US
+# node-llama-cpp 用官方预编译二进制，不触发 node-gyp 重编译
+npmRebuild: false

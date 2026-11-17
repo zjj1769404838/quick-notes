@@ -1,0 +1,20 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+.env
+.env.local
+*.tsbuildinfo
+# 模型文件不入库（体积大、可按需下载）
+resources/models/*
+!resources/models/.gitkeep
+# 打包生成物与临时目录
+.icon-ico/
+.tmp-ud*/
+.acc*/
+build/icon.svg
+
+# DSH 宿主会话元数据（非项目代码）
+.dsh-ops/

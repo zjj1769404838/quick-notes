@@ -1,0 +1,57 @@
+/* 悬浮球样式 —— 对齐 02 §3 的 8 态状态机 */
+html,
+body,
+#root {
+  background: transparent !important;
+  overflow: hidden;
+}
+
+.ball-wrap {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.ball {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--r-full);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(145deg, #6690ff 0%, var(--accent) 55%, #3a63e0 100%);
+  box-shadow: var(--shadow-ball);
+  transition:
+    transform var(--d-fast) var(--ease),
+    box-shadow var(--d-fast) var(--ease),
+    filter var(--d-fast) var(--ease);
+  cursor: grab;
+  will-change: transform;
+}
+
+/* 悬停：放大 + 提亮 */
+.ball-wrap[data-state='hover'] .ball {
+  transform: scale(1.06);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 22px rgba(79, 124, 255, 0.42);
+}
+
+/* 按下：轻微回缩 */
+.ball-wrap[data-state='press'] .ball {
+  transform: scale(0.96);
+  filter: brightness(0.96);
+}
+
+/* 拖动中：抬起感 + 抓手 */
+.ball-wrap[data-state='dragging'] .ball {
+  transform: scale(1.04);
+  cursor: grabbing;
+  box-shadow: 0 14px 30px rgba(16, 24, 40, 0.45);
+}
+
+.ball:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
+}

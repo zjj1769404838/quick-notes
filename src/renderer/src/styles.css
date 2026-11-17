@@ -1,0 +1,143 @@
+/* 设计令牌 —— 对齐 02-UI-UX设计文档.md
+   浅色/深色两套；对比度按文档实测值选取 */
+:root {
+  /* 中性色（浅） */
+  --bg: #ffffff;
+  --bg-subtle: #f6f7f9;
+  --bg-hover: #eef1f6;
+  --bg-active: #e4e9f2;
+  --text: #1a1d23;          /* 对 --bg 17.21:1 */
+  --text-secondary: #58606e; /* 7.29:1 */
+  --text-meta: #6b7280;      /* 5.38:1 */
+  --border: #d8dee8;
+  --border-strong: #b8c2d0;
+
+  /* 主色 */
+  --accent: #4f7cff;
+  --accent-hover: #3d6aef;
+  --accent-soft: #e8eeff;
+  --accent-text: #1e4fd8;
+
+  /* 语义色 */
+  --ok: #15803d;
+  --warn: #b45309;
+  --danger: #b91c1c;
+  --danger-soft: #fdecea;
+  --ok-soft: #e7f5ec;
+
+  /* 版式 */
+  --font-ui: -apple-system, "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", "JetBrains Mono", monospace;
+  --fs-title: 17px;
+  --fs-body: 14px;
+  --fs-meta: 12px;
+  --lh-body: 1.6;
+
+  /* 间距 4 的倍数 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* 圆角与阴影 */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+  --shadow-panel: 0 12px 32px rgba(16, 24, 40, 0.16), 0 2px 6px rgba(16, 24, 40, 0.08);
+  --shadow-ball: 0 6px 18px rgba(16, 24, 40, 0.28);
+
+  /* 动效 */
+  --d-fast: 120ms;
+  --d-mid: 180ms;
+  --ease: cubic-bezier(0, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d;
+    --bg-subtle: #1c1f26;
+    --bg-hover: #23272f;
+    --bg-active: #2b303a;
+    --text: #e8eaee;          /* 13.77:1 */
+    --text-secondary: #a8b0bd; /* 7.22:1 */
+    --text-meta: #8b94a3;      /* 8.83:1 附近 */
+    --border: #2e333d;
+    --border-strong: #414855;
+
+    --accent: #6d95ff;
+    --accent-hover: #85a6ff;
+    --accent-soft: #1e2a47;
+    --accent-text: #9db8ff;
+
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --danger-soft: #3a1d1a;
+    --ok-soft: #16301f;
+
+    --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-ball: 0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+  user-select: none;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+input,
+textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* 焦点环 —— 键盘可达（02 §9） */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* 低配模式：关闭动效（02 §10） */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+.low-end * {
+  transition: none !important;
+  animation: none !important;
+}
