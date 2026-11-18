@@ -18,6 +18,9 @@ export function SettingsPanel({ cfg, onClose, onChange, pushToast, onTagClick }:
   const [tags, setTags] = useState<Array<{ tag: string; count: number }>>([])
   const [indexStat, setIndexStat] = useState<{ ready: boolean; docs: number; lastBuiltAt: number; building: boolean } | null>(null)
   const [semStat, setSemStat] = useState<{ available: boolean; ready: boolean; chunks: number; builtAt: number; building: boolean } | null>(null)
+  // 最近删除：误删后能在应用内找回（docs/05 §4 U10）
+  const [trash, setTrash] = useState<Array<{ relPath: string; originalPath: string; deletedAt: string; size: number }>>([])
+  const [trashOpen, setTrashOpen] = useState(false)
 
   useEffect(() => {
     void (async () => {
@@ -32,6 +35,8 @@ export function SettingsPanel({ cfg, onClose, onChange, pushToast, onTagClick }:
       const i = await window.qn.search.status()
       if (i.ok) setIndexStat(i.data)
       const sm = await window.qn.search.semanticStatus()
+      const tr = await window.qn.notes.listTrash()
+      if (tr.ok) setTrash(tr.data)
       if (sm.ok) setSemStat(sm.data)
     })()
     return window.qn.events.onModelProgress((p) => {
@@ -293,6 +298,58 @@ export function SettingsPanel({ cfg, onClose, onChange, pushToast, onTagClick }:
               )
             })}
           </>
+        )}
+
+        <h3>最近删除</h3>
+        <div className="setting-row">
+          <div className="k">
+            回收站
+            <small>
+              {trash.length > 0
+                ? '共 ' + trash.length + ' 篇，删除后仍在这里，可随时恢复'
+                : '目前没有已删除的笔记'}
+            </small>
+          </div>
+          <div className="v">
+            <button
+              className="btn ghost small"
+              disabled={trash.length === 0}
+              onClick={async () => {
+                const r = await window.qn.notes.listTrash()
+                if (r.ok) setTrash(r.data)
+                setTrashOpen((v) => !v)
+              }}
+            >
+              {trashOpen ? '收起' : '查看'}
+            </button>
+          </div>
+        </div>
+        {trashOpen && trash.length > 0 && (
+          <div className="trash-list">
+            {trash.map((t) => (
+              <div key={t.relPath} className="trash-item">
+                <span className="trash-name" title={t.originalPath}>
+                  {t.originalPath}
+                </span>
+                <span className="trash-date">{t.deletedAt}</span>
+                <button
+                  className="btn ghost small"
+                  onClick={async () => {
+                    const r = await window.qn.notes.restoreFromTrash(t.relPath)
+                    if (r.ok) {
+                      pushToast('info', '已恢复为 ' + r.data.relPath)
+                      const l = await window.qn.notes.listTrash()
+                      if (l.ok) setTrash(l.data)
+                    } else {
+                      pushToast('error', '恢复失败：' + r.error.message)
+                    }
+                  }}
+                >
+                  恢复
+                </button>
+              </div>
+            ))}
+          </div>
         )}
 
         <h3>索引与标签</h3>

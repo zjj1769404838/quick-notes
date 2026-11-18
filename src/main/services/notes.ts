@@ -326,6 +326,75 @@ export class NoteService {
     }
   }
 
+  /** 列出回收站内容（按日期分组，最新在前） */
+  async listTrash(): Promise<Array<{ relPath: string; originalPath: string; deletedAt: string; size: number }>> {
+    const trashRoot = path.join(this.root, TRASH_DIR)
+    const out: Array<{ relPath: string; originalPath: string; deletedAt: string; size: number }> = []
+    const walk = async (abs: string, rel: string): Promise<void> => {
+      let entries: import('node:fs').Dirent[]
+      try {
+        entries = await fs.readdir(abs, { withFileTypes: true })
+      } catch {
+        return
+      }
+      for (const e of entries) {
+        const childAbs = path.join(abs, e.name)
+        const childRel = rel ? rel + '/' + e.name : e.name
+        if (e.isDirectory()) {
+          await walk(childAbs, childRel)
+        } else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+          const parts = childRel.split('/')
+          const day = parts[0] || ''
+          const original = parts.slice(1).join('/')
+          let size = 0
+          try {
+            size = (await fs.stat(childAbs)).size
+          } catch { /* ignore */ }
+          out.push({
+            relPath: TRASH_DIR + '/' + childRel,
+            originalPath: original,
+            deletedAt: day,
+            size
+          })
+        }
+      }
+    }
+    await walk(trashRoot, '')
+    // 删除日期是目录名 YYYYMMDD，倒序即最新在前
+    out.sort((a, b) => (a.deletedAt < b.deletedAt ? 1 : -1))
+    return out
+  }
+
+  /** 从回收站恢复到原路径；原路径已存在时加 -restored 后缀，不覆盖现有笔记 */
+  async restoreFromTrash(trashRelPath: string): Promise<{ relPath: string }> {
+    const from = resolveInRoot(this.root, trashRelPath)
+    if (!existsSync(from)) {
+      const err = new Error('回收站里没有这个文件') as Error & { code?: string }
+      err.code = ErrorCode.E_NOT_FOUND
+      throw err
+    }
+    const parts = trashRelPath.split('/')
+    const original = parts.slice(2).join('/')
+    if (!original) {
+      const err = new Error('无法推断原路径') as Error & { code?: string }
+      err.code = ErrorCode.E_INVALID_PATH
+      throw err
+    }
+    let targetRel = original
+    if (existsSync(path.join(this.root, targetRel))) {
+      targetRel = original.replace(/\.md$/i, '') + '-restored.md'
+      let k = 2
+      while (existsSync(path.join(this.root, targetRel))) {
+        targetRel = original.replace(/\.md$/i, '') + `-restored-${k}.md`
+        k++
+      }
+    }
+    const to = resolveInRoot(this.root, targetRel)
+    await fs.mkdir(path.dirname(to), { recursive: true })
+    await fs.rename(from, to)
+    return { relPath: targetRel }
+  }
+
   /** 保存剪贴板图片到同目录 assets/，返回可插入的相对链接（FR-4.10） */
   async savePastedImage(noteRelPath: string, pngBytes: Buffer): Promise<string> {
     const dir = path.dirname(noteRelPath)

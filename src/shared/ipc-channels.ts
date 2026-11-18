@@ -32,6 +32,8 @@ export const IPC = {
   noteDelete: 'note:delete',
   noteRecent: 'note:recent',
   noteRevealInExplorer: 'note:reveal',
+  trashList: 'note:trashList',
+  trashRestore: 'note:trashRestore',
 
   /* 目录 */
   rootGet: 'root:get',

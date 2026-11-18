@@ -361,6 +361,12 @@ function registerIpc(): void {
     return true
   })
   handle(IPC.noteRecent, () => cfgSvc.current().recent)
+  handle(IPC.trashList, () => noteSvc.listTrash())
+  handle(IPC.trashRestore, async (trashRel: string) => {
+    const r = await noteSvc.restoreFromTrash(trashRel)
+    refreshIndexSoon(r.relPath)
+    return r
+  })
 
   /* --- 目录 --- */
   handle(IPC.rootGet, () => cfgSvc.current().noteRoot)
@@ -518,6 +524,7 @@ function registerIpc(): void {
   })
 
   /* --- 系统 --- */
+  handle('hotkey:status', () => ({ failed: hotkeyFailure, newNote: cfgSvc.current().hotkey.newNote, togglePanel: cfgSvc.current().hotkey.togglePanel }))
   handle(IPC.sysInfo, (): SystemInfo => {
     return {
       totalMemGb: Math.round((os.totalmem() / 1024 ** 3) * 10) / 10,
@@ -557,6 +564,30 @@ function registerIpc(): void {
   })}
 
 /* ============ 全局热键 ============ */
+/** 热键注册结果：启动时面板可能还没建，提示要延后补发（docs/05 §4 U5） */
+let hotkeyFailure: string[] = []
+
+function notifyHotkeyFailure(text: string): void {
+  // 有面板就直接弹 toast，没有就等面板出现时补发 → 用延迟重试覆盖「面板后建」的情况
+  const panel = winSvc?.getPanel?.()
+  if (panel && !panel.isDestroyed()) {
+    panel.webContents.send(IPC.evtToast, { level: 'warn', text })
+    return
+  }
+  const retry = (n: number): void => {
+    if (n <= 0) return
+    setTimeout(() => {
+      const p2 = winSvc?.getPanel?.()
+      if (p2 && !p2.isDestroyed()) {
+        p2.webContents.send(IPC.evtToast, { level: 'warn', text })
+      } else {
+        retry(n - 1)
+      }
+    }, 1500)
+  }
+  retry(20)
+}
+
 function applyHotkeys(): void {
   globalShortcut.unregisterAll()
   const cfg = cfgSvc.current()
@@ -574,11 +605,9 @@ function applyHotkeys(): void {
     results.push({ accel: cfg.hotkey.togglePanel, ok: false })
   }
   const failed = results.filter((r) => !r.ok)
+  hotkeyFailure = failed.map((f) => f.accel)
   if (failed.length) {
-    winSvc.getPanel()?.webContents.send(IPC.evtToast, {
-      level: 'warn',
-      text: `热键 ${failed.map((f) => f.accel).join('、')} 被其他程序占用，可在设置里更换。`
-    })
+    notifyHotkeyFailure(`热键 ${failed.map((f) => f.accel).join('、')} 被其他程序占用，可在设置里更换。`)
   }
 }
 

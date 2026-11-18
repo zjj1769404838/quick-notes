@@ -57,7 +57,10 @@ const api = {
     rename: (rel: string, name: string) => invoke<{ relPath: string }>(IPC.noteRename, rel, name),
     delete: (rel: string) => invoke<boolean>(IPC.noteDelete, rel),
     reveal: (rel: string) => invoke<boolean>(IPC.noteRevealInExplorer, rel),
-    recent: () => invoke<Array<{ path: string; openedAt: string }>>(IPC.noteRecent)
+    recent: () => invoke<Array<{ path: string; openedAt: string }>>(IPC.noteRecent),
+    listTrash: () =>
+      invoke<Array<{ relPath: string; originalPath: string; deletedAt: string; size: number }>>(IPC.trashList),
+    restoreFromTrash: (trashRel: string) => invoke<{ relPath: string }>(IPC.trashRestore, trashRel)
   },
   capture: {
     save: (input: { relPath: string | null; desiredName: string; markdown: string }) =>

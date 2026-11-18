@@ -1137,3 +1137,54 @@ input.ctl[type='range'] {
   text-align: center;
   line-height: 1.7;
 }
+
+/* ---- 单栏折叠：目录树默认只占一行，点开才展开（docs/05 §4 U8） ---- */
+/* 必须用与 .body[data-layout] .sidebar 同等或更高的选择器，否则 260px 会压过这里 */
+.body .sidebar[data-collapsed='true'],
+.sidebar[data-collapsed='true'] {
+  max-height: 34px;
+  min-height: 34px;
+  overflow: hidden;
+}
+
+.body .sidebar[data-collapsed='true'] .sidebar-scroll,
+.sidebar[data-collapsed='true'] .sidebar-scroll,
+.sidebar[data-collapsed='true'] .tag-cloud {
+  display: none;
+}
+
+/* ---- 最近删除：回收站列表（docs/05 §4 U10） ---- */
+.trash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 4px 0 8px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.trash-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  font-size: 12px;
+}
+
+.trash-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.trash-date {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}

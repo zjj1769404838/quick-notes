@@ -435,7 +435,9 @@ export function App(): React.JSX.Element {
       if (!mod) {
         if (e.key === 'Escape') {
           if (aiOpen) setAiOpen(false)
-          else if (route === 'search') setRoute('note')
+          else if (route === 'search' || route === 'settings') setRoute('note')
+          // 回到笔记页再按一次 Esc → 收起面板（键盘用户原先无路可退）
+          else if (route === 'note') void window.qn.window.panelHide()
         }
         return
       }
@@ -462,6 +464,8 @@ export function App(): React.JSX.Element {
 
   // 标签过滤：原先 tagFilter 只是显示一个 chip，树完全没过滤（docs/05 §4 U2）
   // 这里在索引里查出含该标签的路径集合，再交给树过滤。
+  // 单栏下目录树常驻会占掉 260px，写作区只剩一半 —— 默认折成一行（docs/05 §4 U8）
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [tagPaths, setTagPaths] = useState<Set<string> | null>(null)
   useEffect(() => {
     if (!tagFilter) {
@@ -563,14 +567,33 @@ export function App(): React.JSX.Element {
         <button className="icon-btn no-drag" title="设置 (Ctrl+,)" onClick={() => setRoute('settings')}>
           ⚙
         </button>
+        <button
+          className="icon-btn no-drag"
+          title="收起面板 (Esc)"
+          aria-label="收起面板"
+          onClick={() => void window.qn.window.panelHide()}
+        >
+          ✕
+        </button>
       </div>
 
       <div className="body" data-layout={bodyLayout} style={{ position: 'relative' }}>
         {(layout === 'horizontal' || layout === 'vertical' || layout === 'single') && (
-          <aside className="sidebar">
+          <aside className="sidebar" data-collapsed={layout === 'single' && !sidebarOpen}>
             <div className="sidebar-head">
               <span>笔记</span>
               <span style={{ marginLeft: 'auto', fontSize: 11 }}>{tree ? countNotes(tree) : 0}</span>
+              {layout === 'single' && (
+                <button
+                  className="icon-btn"
+                  style={{ width: 22, height: 22 }}
+                  title={sidebarOpen ? '收起列表' : '展开列表'}
+                  aria-expanded={sidebarOpen}
+                  onClick={() => setSidebarOpen((v) => !v)}
+                >
+                  {sidebarOpen ? '▴' : '▾'}
+                </button>
+              )}
             </div>
             {tagFilter && (
               <div style={{ padding: '0 8px 6px' }}>
