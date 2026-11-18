@@ -23,6 +23,7 @@ import { IndexService } from './services/index.js'
 import { AiService } from './services/ai.js'
 import { WindowService } from './services/windows.js'
 import { SemanticIndex } from './services/semantic.js'
+import { CaptureService } from './services/capture.js'
 import { bootLog } from './services/logger.js'
 
 const DEV_URL = process.env.ELECTRON_RENDERER_URL ?? null
@@ -52,6 +53,7 @@ const cfgSvc = new ConfigService()
 let noteSvc: NoteService
 let indexSvc: IndexService
 let semanticSvc: SemanticIndex
+let captureSvc: CaptureService
 let aiSvc: AiService
 let winSvc: WindowService
 let tray: Tray | null = null
@@ -225,9 +227,13 @@ function buildTray(): void {
   tray.setToolTip('随手笔记')
   const menu = Menu.buildFromTemplate([
     {
-      label: '新建笔记',
+      label: '快速捕捉',
       accelerator: 'Ctrl+Alt+N',
-      click: () => void newNoteAndShow()
+      click: () => captureSvc.show()
+    },
+    {
+      label: '打开主面板',
+      click: () => void winSvc.showPanel()
     },
     {
       label: '显示 / 隐藏面板',
@@ -283,7 +289,17 @@ function registerIpc(): void {
     return true
   })
   handle(IPC.panelShow, async () => {
+    // 球单击的语义改为「快速捕捉」，主面板走球双击 / 托盘
+    captureSvc.show()
+    return true
+  })
+  handle('panel:openMain', async () => {
     await winSvc.showPanel()
+    return true
+  })
+  // 球双击 / 托盘「新建笔记」→ 主面板新建（保留旧能力，避免能力丢失）
+  handle('note:newInMain', async () => {
+    await newNoteAndShow()
     return true
   })
   handle(IPC.panelHide, () => {
@@ -323,6 +339,25 @@ function registerIpc(): void {
   })
   handle(IPC.noteRevealInExplorer, (rel: string) => {
     winSvc.openInExplorer(rel, cfgSvc.current().noteRoot)
+    return true
+  })
+
+  /* --- 快速捕捉窗 --- */
+  handle(IPC.captureSave, async (input: { relPath: string | null; desiredName: string; markdown: string }) => {
+    const r = await captureSvc.save(input)
+    refreshIndexSoon(r.relPath)
+    return r
+  })
+  handle(IPC.captureRename, async (relPath: string, desiredName: string) => {
+    const r = await captureSvc.rename(relPath, desiredName)
+    refreshIndexSoon(r.relPath)
+    return r
+  })
+  handle(IPC.capturePending, () => captureSvc.pending())
+  handle(IPC.captureClose, (opts: { keepDraft: boolean }) => {
+    // keepDraft=true 时草稿已在主进程内存中，直接隐藏即可
+    void opts
+    captureSvc.hide()
     return true
   })
   handle(IPC.noteRecent, () => cfgSvc.current().recent)
@@ -527,7 +562,7 @@ function applyHotkeys(): void {
   const cfg = cfgSvc.current()
   const results: Array<{ accel: string; ok: boolean }> = []
   try {
-    const okNew = globalShortcut.register(cfg.hotkey.newNote, () => void newNoteAndShow())
+    const okNew = globalShortcut.register(cfg.hotkey.newNote, () => captureSvc.show())
     results.push({ accel: cfg.hotkey.newNote, ok: okNew })
   } catch {
     results.push({ accel: cfg.hotkey.newNote, ok: false })
@@ -560,6 +595,7 @@ app.whenReady().then(async () => {
   indexSvc = new IndexService(cfg.noteRoot, indexDir())
   semanticSvc = new SemanticIndex(cfg.noteRoot, indexDir())
   winSvc = new WindowService(cfgSvc, DEV_URL)
+  captureSvc = new CaptureService(noteSvc, dataDir(), DEV_URL, __dirname)
   aiSvc = new AiService(modelRoot(), {
     onStream: (chunk) => {
       winSvc.getPanel()?.webContents.send(IPC.aiStream, chunk)
@@ -582,6 +618,7 @@ app.whenReady().then(async () => {
     void (async () => {
       try {
         await noteSvc.ensureRoot()
+        await captureSvc.loadDraft()
         await indexSvc.load()
         // 语义索引也要在启动时读回，否则重启后语义检索会静默失效
         await semanticSvc.load()

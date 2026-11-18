@@ -57,6 +57,16 @@ const api = {
     reveal: (rel: string) => invoke<boolean>(IPC.noteRevealInExplorer, rel),
     recent: () => invoke<Array<{ path: string; openedAt: string }>>(IPC.noteRecent)
   },
+  capture: {
+    save: (input: { relPath: string | null; desiredName: string; markdown: string }) =>
+      invoke<{ relPath: string }>(IPC.captureSave, input),
+    rename: (relPath: string, desiredName: string) =>
+      invoke<{ relPath: string }>(IPC.captureRename, relPath, desiredName),
+    pending: () =>
+      invoke<{ name: string; title: string; body: string } | null>(IPC.capturePending),
+    close: (opts: { keepDraft: boolean }) => invoke<boolean>(IPC.captureClose, opts),
+    onOpen: (cb: () => void) => on(IPC.captureOpen, cb)
+  },
   root: {
     get: () => invoke<string>(IPC.rootGet),
     choose: () => invoke<string | null>(IPC.rootChoose),

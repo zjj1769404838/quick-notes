@@ -48,6 +48,7 @@ export default defineConfig({
       rollupOptions: {
         input: {
           ball: resolve(__dirname, 'src/renderer/ball.html'),
+          capture: resolve(__dirname, 'src/renderer/capture.html'),
           panel: resolve(__dirname, 'src/renderer/panel.html')
         },
         output: {

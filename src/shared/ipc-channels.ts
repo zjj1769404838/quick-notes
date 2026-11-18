@@ -16,6 +16,13 @@ export const IPC = {
   panelGetBounds: 'window:panelGetBounds',
   panelSetIgnoreMouse: 'window:panelSetIgnoreMouse',
 
+  /* 快速捕捉窗 */
+  captureSave: 'capture:save',
+  captureRename: 'capture:rename',
+  capturePending: 'capture:pending',
+  captureClose: 'capture:close',
+  captureOpen: 'capture:open',
+
   /* 笔记 */
   noteListTree: 'note:listTree',
   noteRead: 'note:read',
