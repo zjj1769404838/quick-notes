@@ -55,8 +55,8 @@
   --ease: cubic-bezier(0, 0, 0.2, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+/* 主题：显式选择（data-theme）优先，system 模式由 media query 兜底 */
+:root[data-theme='dark'] {
     --bg: #16181d;
     --bg-subtle: #1c1f26;
     --bg-hover: #23272f;
@@ -78,6 +78,31 @@
     --danger-soft: #3a1d1a;
     --ok-soft: #16301f;
 
+    --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-ball: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+
+/* system 模式：跟随操作系统偏好（仅当用户未显式选择 light/dark 时生效） */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #16181d;
+    --bg-subtle: #1c1f26;
+    --bg-hover: #23272f;
+    --bg-active: #2b303a;
+    --text: #e8eaee;
+    --text-secondary: #a8b0bd;
+    --text-meta: #8b94a3;
+    --border: #2e333d;
+    --border-strong: #414855;
+    --accent: #6d95ff;
+    --accent-hover: #85a6ff;
+    --accent-soft: #1e2a47;
+    --accent-text: #9db8ff;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --danger-soft: #3a1d1a;
+    --ok-soft: #16301f;
     --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
     --shadow-ball: 0 6px 18px rgba(0, 0, 0, 0.55);
   }

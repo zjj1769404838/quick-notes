@@ -8,6 +8,7 @@ export const IPC = {
   ballShow: 'window:ballShow',
   ballHide: 'window:ballHide',
   ballSetPos: 'window:ballSetPos',
+  ballSnap: 'window:ballSnap',
   ballGetPos: 'window:ballGetPos',
   panelShow: 'window:panelShow',
   panelHide: 'window:panelHide',
@@ -60,7 +61,10 @@ export const IPC = {
   evtFileChanged: 'evt:fileChanged',
   evtToast: 'evt:toast',
   evtPanelShown: 'evt:panelShown',
-  evtPanelHidden: 'evt:panelHidden'
+  evtPanelHidden: 'evt:panelHidden',
+  // 主进程退出/隐藏面板前要求渲染层立即落盘
+  evtFlushSave: 'evt:flushSave',
+  noteFlushDone: 'note:flushDone'
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]

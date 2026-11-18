@@ -228,13 +228,15 @@ export class AiService {
     const abort = new AbortController()
     this.downloading.set(id, { abort })
     const dir = this.modelDir(id)
-    await fs.mkdir(dir, { recursive: true })
     const target = path.join(dir, spec.file)
     const part = `${target}.part`
 
     const report = (p: ModelDownloadProgress): void => this.events.onDownload(p)
 
     try {
+      // mkdir 必须在 try 内：磁盘满/无权限时若在 try 外抛出，
+      // finally 里的 downloading.delete 不会执行，该模型的下载锁会永久残留（本次会话再也下不了）。
+      await fs.mkdir(dir, { recursive: true })
       let offset = 0
       if (existsSync(part)) offset = statSync(part).size
       if (existsSync(target) && statSync(target).size === spec.bytes) {
@@ -401,6 +403,7 @@ export class AiService {
     const state = { cancelled: false }
     this.activeRuns.set(runId, state)
 
+    let cancelWatch: NodeJS.Timeout | null = null
     void (async () => {
       let context: { getSequence: () => unknown; dispose: () => Promise<void> } | null = null
       try {
@@ -436,7 +439,7 @@ export class AiService {
         })
 
         const abort = new AbortController()
-        const cancelWatch = setInterval(() => {
+        cancelWatch = setInterval(() => {
           if (state.cancelled) abort.abort()
         }, 120)
 
@@ -457,8 +460,6 @@ export class AiService {
             this.events.onStream({ runId, seq: seqNo++, delta: chunk, done: false })
           }
         })
-        clearInterval(cancelWatch)
-
         // 若流式没触发（某些后端一次性返回），兜底把整段发出去
         if (acc.length === 0 && text.length > 0) {
           this.events.onStream({ runId, seq: seqNo++, delta: text, done: false })
@@ -477,6 +478,11 @@ export class AiService {
             : { code: code ?? ErrorCode.E_UNKNOWN, message: (e as Error).message }
         })
       } finally {
+        try {
+          if (cancelWatch) clearInterval(cancelWatch)
+        } catch {
+          /* 忽略 */
+        }
         try {
           if (context) await context.dispose()
         } catch {
@@ -557,6 +563,7 @@ export class AiService {
   }
 
   async dispose(): Promise<void> {
+    await this.releaseEmbedding()
     for (const s of this.activeRuns.values()) s.cancelled = true
     for (const d of this.downloading.values()) d.abort.abort()
     await this.unload()

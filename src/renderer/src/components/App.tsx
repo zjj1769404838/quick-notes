@@ -28,7 +28,9 @@ export function App(): React.JSX.Element {
   const [saveState, setSaveState] = useState<SaveState>('saved')
   const [cursor, setCursor] = useState({ line: 1, col: 1 })
   const [route, setRoute] = useState<Route>('note')
-  const [showPreview, setShowPreview] = useState(true)
+  // 单栏模式下默认进「编辑」：新建笔记后最需要的是写作区，空预览会让人以为没打开
+  const [showPreview, setShowPreview] = useState(false)
+  const [splitRatio, setSplitRatio] = useState(0.5)
   const [width, setWidth] = useState(480)
   const [toasts, setToasts] = useState<Array<{ id: number; level: string; text: string }>>([])
   const [outlineOpen, setOutlineOpen] = useState(false)
@@ -38,7 +40,18 @@ export function App(): React.JSX.Element {
   const [tagFilter, setTagFilter] = useState<string | null>(null)
 
   const saveTimer = useRef<number | null>(null)
+  // 编辑器实例 ref 之外再留一份最新正文，供无法访问编辑器时的兜底保存使用
+  const bodyRef = useRef<string>('')
+  // flush 回调在组件外触发，需要 ref 读取当前上下文
+  const currentRelRef = useRef<string | null>(null)
+  const currentEolRef = useRef<'lf' | 'crlf' | null>(null)
+  const currentFmRef = useRef<string | null>(null)
   const debounceRef = useRef<number>(120)
+  const previewTimer = useRef<number | null>(null)
+  const lowEndNotified = useRef(false)
+  // 拖拽回调里需要读取最新布局与配置，用 ref 避免闭包陈旧
+  const bodyLayoutRef = useRef<string>('single')
+  const configRef = useRef<AppConfig | null>(null)
   const renderTimes = useRef<number[]>([])
   const unsavedRef = useRef(false)
 
@@ -56,6 +69,7 @@ export function App(): React.JSX.Element {
       if (r.ok) {
         setCfg(r.data)
         setWidth(r.data.panel.width)
+        setSplitRatio(r.data.panel.splitRatio ?? 0.5)
         setRoute(r.data.onboardingDone ? 'note' : 'onboarding')
       }
       const w = await window.qn.window.panelGetBounds()
@@ -64,6 +78,28 @@ export function App(): React.JSX.Element {
       if (t.ok) setTree(t.data)
     })()
   }, [])
+
+  /* ---- 字号应用：设置里的字号要真的作用到编辑器/预览 ---- */
+  useEffect(() => {
+    if (!cfg) return
+    document.documentElement.style.setProperty('--fs-body', cfg.editor.fontSize + 'px')
+  }, [cfg?.editor.fontSize])
+
+  /* ---- 主题应用（FR-8）：配置里的 theme 必须真的落到 DOM，否则设置项是摆设 ---- */
+  useEffect(() => {
+    if (!cfg) return
+    const root = document.documentElement
+    const apply = (): void => {
+      if (cfg.theme === 'system') delete root.dataset.theme
+      else root.dataset.theme = cfg.theme
+    }
+    apply()
+    if (cfg.theme !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (): void => apply()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [cfg?.theme])
 
   /* ---- 宽度自适应 ---- */
   useEffect(() => {
@@ -74,6 +110,8 @@ export function App(): React.JSX.Element {
   }, [])
 
   const layout = useMemo(() => (cfg ? layoutFor(width, cfg.panel.layout) : 'single'), [width, cfg])
+  bodyLayoutRef.current = layout
+  configRef.current = cfg
 
   /* ---- 事件订阅 ---- */
   useEffect(() => {
@@ -88,8 +126,23 @@ export function App(): React.JSX.Element {
     })
     const off2 = window.qn.events.onToast((p) => {
       if (p.route === 'settings') setRoute('settings')
-      if (p.route === 'open' && p.relPath) void openNote(p.relPath)
+      if (p.route === 'open' && p.relPath) void openNoteRef.current(p.relPath)
       if (p.text) pushToast(p.level, p.text)
+    })
+    // 主进程退出/隐藏前会请求 flush：此刻必须把内存里的最新正文落盘，
+    // 否则 800ms 防抖窗口内的最后一笔输入会随窗口销毁而丢失。
+    const offFlush = window.qn.events.onFlushSave(() => {
+      void (async () => {
+        try {
+          const live = apiRef.current?.getValue()
+          const rel = currentRelRef.current
+          if (rel && live !== undefined && currentEolRef.current) {
+            await window.qn.notes.write(rel, live, currentEolRef.current, currentFmRef.current ?? undefined)
+          }
+        } finally {
+          window.qn.flush.done()
+        }
+      })()
     })
     const off3 = window.qn.events.onConfigChanged((c) => setCfg(c))
     const off4 = window.qn.events.onRootChanged(() => {
@@ -105,11 +158,15 @@ export function App(): React.JSX.Element {
       off2()
       off3()
       off4()
+      offFlush()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, pushToast])
 
   /* ---- 打开笔记 ---- */
+  // 用 ref 持有 openNote，供事件回调使用：
+  // 事件订阅的 useEffect 在 openNote 之前声明，直接引用会触发暂时性死区 ReferenceError。
+  const openNoteRef = useRef<(rel: string) => Promise<void>>(async () => undefined)
   const openNote = useCallback(
     async (rel: string) => {
       const r = await window.qn.notes.read(rel)
@@ -118,6 +175,9 @@ export function App(): React.JSX.Element {
         return
       }
       setCurrent(r.data)
+      currentRelRef.current = r.data.relPath
+      currentEolRef.current = r.data.eol
+      currentFmRef.current = r.data.rawFrontmatter
       setBody(r.data.body)
       setSaveState('saved')
       unsavedRef.current = false
@@ -132,12 +192,53 @@ export function App(): React.JSX.Element {
     },
     [cfg?.recent, pushToast]
   )
+  openNoteRef.current = openNote
+
+  /* ---- 分栏拖拽（FR-3.3） ---- */
+  const onSplitterDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    const area = (e.currentTarget as HTMLElement).parentElement
+    if (!area) return
+    const horizontal = bodyLayoutRef.current === 'horizontal'
+    const move = (ev: MouseEvent): void => {
+      const rect = area.getBoundingClientRect()
+      const ratio = horizontal
+        ? (ev.clientX - rect.left) / rect.width
+        : (ev.clientY - rect.top) / rect.height
+      setSplitRatio(Math.max(0.2, Math.min(0.8, ratio)))
+    }
+    const up = (): void => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      setSplitRatio((r) => {
+        const base = configRef.current?.panel
+        if (base) void window.qn.config.patch({ panel: { ...base, splitRatio: r } })
+        return r
+      })
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.style.cursor = horizontal ? 'col-resize' : 'row-resize'
+  }, [])
+
+  const resetSplit = useCallback(() => {
+    setSplitRatio(0.5)
+    const base = configRef.current?.panel
+    if (base) void window.qn.config.patch({ panel: { ...base, splitRatio: 0.5 } })
+  }, [])
 
   /* ---- 保存 ---- */
   const doSave = useCallback(async () => {
     if (!current) return
+    // 关键：从编辑器实时取值，不用 React state 闭包。
+    // 自动保存的 setTimeout 捕获的是「设置定时器那一刻」的 body，
+    // 若用闭包快照，最后一笔输入会被静默丢弃却仍显示「已保存」。
+    const live = apiRef.current?.getValue()
+    const payload = live ?? bodyRef.current
     setSaveState('saving')
-    const r = await window.qn.notes.write(current.relPath, body, current.eol)
+    // 第 4 参必须回传原始 frontmatter：read() 已剥离它，若不带回会整块删掉用户的 YAML
+    const r = await window.qn.notes.write(current.relPath, payload, current.eol, current.rawFrontmatter ?? undefined)
     if (r.ok) {
       setSaveState('saved')
       unsavedRef.current = false
@@ -148,12 +249,13 @@ export function App(): React.JSX.Element {
       setSaveState('unsaved')
       pushToast('error', `保存失败：${r.error.message}`)
     }
-  }, [current, body, pushToast])
+  }, [current, pushToast])
 
   /* ---- 编辑变更：防抖保存 + 自适应预览 ---- */
   const onBodyChange = useCallback(
     (v: string) => {
       setBody(v)
+      bodyRef.current = v
       setSaveState('unsaved')
       unsavedRef.current = true
       window.qn.window.setUnsaved(true)
@@ -165,18 +267,24 @@ export function App(): React.JSX.Element {
       }, delay)
 
       // 自适应预览防抖（FR-3.2）
-      const t0 = performance.now()
-      const html = renderMarkdown(v)
-      const took = performance.now() - t0
-      renderTimes.current = [...renderTimes.current.slice(-4), took]
-      const sorted = [...renderTimes.current].sort((a, b) => a - b)
-      const median = sorted[Math.floor(sorted.length / 2)] ?? 20
-      const win = median <= 40 ? 120 : median <= 120 ? Math.min(400, Math.round(median * 3)) : 400
-      debounceRef.current = win
-      if (win >= 400) {
-        pushToast('info', '低配模式：预览稍慢')
-      }
-      setPreviewHtml(html)
+      // 关键：渲染不能在按键回调里同步跑（markdown-it + DOMPurify 对长文可达数十 ms，
+      // 会直接吃掉帧预算），必须延后到窗口期结束后执行。窗口值由实测耗时自适应收敛。
+      if (previewTimer.current) window.clearTimeout(previewTimer.current)
+      previewTimer.current = window.setTimeout(() => {
+        const t0 = performance.now()
+        const html = renderMarkdown(v)
+        const took = performance.now() - t0
+        renderTimes.current = [...renderTimes.current.slice(-4), took]
+        const sorted = [...renderTimes.current].sort((a, b) => a - b)
+        const median = sorted[Math.floor(sorted.length / 2)] ?? 20
+        const win = median <= 40 ? 120 : median <= 120 ? Math.min(400, Math.round(median * 3)) : 400
+        debounceRef.current = win
+        if (win >= 400 && !lowEndNotified.current) {
+          lowEndNotified.current = true
+          pushToast('info', '低配模式：预览稍慢')
+        }
+        setPreviewHtml(html)
+      }, debounceRef.current)
     },
     [cfg?.editor.autoSaveDelayMs, doSave, pushToast]
   )
@@ -202,7 +310,8 @@ export function App(): React.JSX.Element {
       return r.data
     },
     gotoLine,
-    readOnly: route !== 'note'
+    readOnly: route !== 'note',
+    mountKey: current?.relPath ?? null
   })
 
   // 切换笔记时重置编辑器内容
@@ -412,14 +521,55 @@ export function App(): React.JSX.Element {
         <div className="editor-area">
           {current ? (
             <>
-              <div className="editor-pane" data-hidden={layout === 'single' && showPreview}>
-                <div className="cm-host" ref={hostRef} />
-              </div>
-              {showPreview && (
-                <div className="preview-pane" data-hidden={false}>
-                  <div className="md" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+              {/* 单栏模式：必须给编辑/预览切换入口，否则默认 480px 下编辑器会被隐藏 */}
+              {layout === 'single' && (
+                <div className="mode-tabs">
+                  <button
+                    className="mode-tab"
+                    data-active={!showPreview}
+                    onClick={() => setShowPreview(false)}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    className="mode-tab"
+                    data-active={showPreview}
+                    onClick={() => setShowPreview(true)}
+                  >
+                    预览
+                  </button>
+                  <span className="mode-hint">Ctrl+E 切换</span>
                 </div>
               )}
+              <div className="panes">
+                <div
+                  className="editor-pane"
+                  data-hidden={layout === 'single' && showPreview}
+                  style={layout !== 'single' ? { flexBasis: `${splitRatio * 100}%` } : undefined}
+                >
+                  <div className="cm-host" ref={hostRef} />
+                </div>
+                {showPreview && layout !== 'single' && (
+                  <div
+                    className="splitter"
+                    role="separator"
+                    aria-orientation={layout === 'horizontal' ? 'vertical' : 'horizontal'}
+                    aria-label="拖动调整编辑与预览比例"
+                    onMouseDown={onSplitterDown}
+                    title="拖动调整比例，双击复位"
+                    onDoubleClick={resetSplit}
+                  />
+                )}
+                {showPreview && (
+                  <div
+                    className="preview-pane"
+                    data-hidden={false}
+                    style={layout !== 'single' ? { flexBasis: `${(1 - splitRatio) * 100}%` } : undefined}
+                  >
+                    <div className="md" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                  </div>
+                )}
+              </div>
             </>
           ) : (
             <div className="empty">

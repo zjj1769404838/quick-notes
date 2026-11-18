@@ -42,10 +42,28 @@ export default defineConfig({
     root: resolve(__dirname, 'src/renderer'),
     plugins: [react()],
     build: {
+      // 桌面应用没有 HTTP gzip，未压缩的注释/缩进会直接进内存与解析路径
+      minify: 'esbuild',
+      cssMinify: true,
       rollupOptions: {
         input: {
           ball: resolve(__dirname, 'src/renderer/ball.html'),
           panel: resolve(__dirname, 'src/renderer/panel.html')
+        },
+        output: {
+          // 把重依赖拆到独立 chunk：首屏只加载必需部分，且这些库几乎不变、利于缓存
+          manualChunks: (id: string): string | undefined => {
+            if (id.includes('node_modules')) {
+              if (id.includes('@codemirror') || id.includes('@lezer') || id.includes('/codemirror/')) {
+                return 'vendor-codemirror'
+              }
+              if (id.includes('markdown-it') || id.includes('dompurify') || id.includes('linkify-it')) {
+                return 'vendor-markdown'
+              }
+              return 'vendor'
+            }
+            return undefined
+          }
         }
       }
     },

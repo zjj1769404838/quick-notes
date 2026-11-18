@@ -186,7 +186,8 @@ export class SemanticIndex {
   /** 全量重建：为所有 chunk 生成向量并落盘 */
   async rebuild(
     notes: Array<{ relPath: string; body: string; mtimeMs: number }>,
-    modelId: string
+    modelId: string,
+    onProgress?: (done: number, total: number) => void
   ): Promise<{ chunks: number; tookMs: number }> {
     if (!this.embedder) throw new Error('embedding 模型未就绪')
     const t0 = Date.now()
@@ -194,14 +195,29 @@ export class SemanticIndex {
     try {
       const chunks: VectorFile['chunks'] = []
       const vecs: Float32Array[] = []
+      // 先算出总 chunk 数，便于进度与分批让出
+      const all: Chunk[] = []
       for (const n of notes) {
         if (!n.body.trim()) continue
-        const cs = chunkNote(n.relPath, n.body)
-        for (const c of cs) {
+        all.push(...chunkNote(n.relPath, n.body))
+      }
+      const total = all.length
+      let processed = 0
+      for (const c of all) {
+        // 复用旧向量：hash 未变的 chunk 直接拷贝，避免重复推理
+        const reused = this.findReusable(c.hash)
+        if (reused) {
+          chunks.push({ id: c.id, relPath: c.relPath, start: c.start, text: c.text, hash: c.hash })
+          vecs.push(reused)
+        } else {
           const v = await this.embedder.embed(c.text)
           chunks.push({ id: c.id, relPath: c.relPath, start: c.start, text: c.text, hash: c.hash })
           vecs.push(normalize(v))
         }
+        processed++
+        onProgress?.(processed, total)
+        // 每 8 个 chunk 让出一次事件循环，防止主进程被长任务占死导致窗口卡顿
+        if (processed % 8 === 0) await new Promise<void>((r) => setImmediate(r))
       }
       const flat = new Float32Array(chunks.length * EMBED_DIM)
       vecs.forEach((v, i) => flat.set(v, i * EMBED_DIM))
@@ -218,6 +234,17 @@ export class SemanticIndex {
     } finally {
       this.building = false
     }
+  }
+
+  /** 从旧索引里按 chunk hash 找可复用向量（内容未变就不重新推理） */
+  private findReusable(hash: string): Float32Array | null {
+    if (!this.data) return null
+    for (let i = 0; i < this.data.chunks.length; i++) {
+      if (this.data.chunks[i].hash === hash) {
+        return this.data.vectors.slice(i * EMBED_DIM, (i + 1) * EMBED_DIM)
+      }
+    }
+    return null
   }
 
   private async persist(): Promise<void> {

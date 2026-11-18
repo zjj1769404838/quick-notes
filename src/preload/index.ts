@@ -20,7 +20,12 @@ import type {
 } from '../shared/types.js'
 
 function invoke<T>(channel: string, ...args: unknown[]): Promise<IpcResult<T>> {
-  return ipcRenderer.invoke(channel, ...args) as Promise<IpcResult<T>>
+  // 统一兜底：通道未注册或主进程异常时 invoke 会 reject，
+  // 若直接抛回渲染层会让首个 useEffect 中断，界面永久卡在「载入中…」。
+  return (ipcRenderer.invoke(channel, ...args) as Promise<IpcResult<T>>).catch((e: unknown) => ({
+    ok: false,
+    error: { code: "E_UNKNOWN", message: (e as Error)?.message ?? String(e) }
+  }))
 }
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -33,6 +38,7 @@ const api = {
   window: {
     ballSetPos: (x: number, y: number) => invoke<boolean>(IPC.ballSetPos, x, y),
     ballGetPos: () => invoke<[number, number]>(IPC.ballGetPos),
+    ballSnap: () => invoke<boolean>(IPC.ballSnap),
     panelShow: () => invoke<boolean>(IPC.panelShow),
     panelHide: () => invoke<boolean>(IPC.panelHide),
     panelGetBounds: () => invoke<Electron.Rectangle | null>(IPC.panelGetBounds),
@@ -81,6 +87,9 @@ const api = {
     info: () => invoke<SystemInfo>(IPC.sysInfo),
     openExternal: (url: string) => invoke<boolean>(IPC.sysOpenExternal, url)
   },
+  flush: {
+    done: () => ipcRenderer.send(IPC.noteFlushDone)
+  },
   clipboard: {
     saveImage: (noteRel: string) => invoke<string | null>('clipboard:saveImage', noteRel)
   },
@@ -93,7 +102,8 @@ const api = {
     onModelProgress: (cb: (p: ModelDownloadProgress) => void) => on(IPC.aiModelProgress, cb),
     onRootChanged: (cb: (p: string) => void) => on(IPC.rootChanged, cb),
     onPanelShown: (cb: () => void) => on(IPC.evtPanelShown, cb),
-    onPanelHidden: (cb: () => void) => on(IPC.evtPanelHidden, cb)
+    onPanelHidden: (cb: () => void) => on(IPC.evtPanelHidden, cb),
+    onFlushSave: (cb: () => void) => on(IPC.evtFlushSave, cb)
   }
 }
 

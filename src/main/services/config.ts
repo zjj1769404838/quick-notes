@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import type { AppConfig } from '../../shared/types.js'
+import { bootLog } from './logger.js'
 
 export const SCHEMA_VERSION = 1
 
@@ -171,17 +172,29 @@ export class ConfigService {
   async persist(): Promise<void> {
     const body = JSON.stringify(this.cache, null, 2)
     const tmp = `${this.file}.tmp`
-    this.writeChain = this.writeChain.then(async () => {
-      await fs.mkdir(path.dirname(this.file), { recursive: true })
-      const fh = await fs.open(tmp, 'w')
-      try {
-        await fh.writeFile(body, 'utf-8')
-        await fh.sync()
-      } finally {
-        await fh.close()
-      }
-      await fs.rename(tmp, this.file)
-    })
+    // 写链必须自带 catch：否则一次瞬时 IO 失败（磁盘满 / 文件被占用）会让
+    // writeChain 永久处于 rejected 状态，之后每次 persist 立刻失败，配置从此静默不落盘。
+    this.writeChain = this.writeChain
+      .then(async () => {
+        await fs.mkdir(path.dirname(this.file), { recursive: true })
+        const fh = await fs.open(tmp, 'w')
+        try {
+          await fh.writeFile(body, 'utf-8')
+          await fh.sync()
+        } finally {
+          await fh.close()
+        }
+        await fs.rename(tmp, this.file)
+      })
+      .catch((e) => {
+        bootLog(`config persist failed: ${(e as Error)?.message ?? String(e)}`)
+        // 清理可能残留的临时文件，避免下次 rename 冲突
+        try {
+          require('node:fs').rmSync(tmp, { force: true })
+        } catch {
+          /* 忽略 */
+        }
+      })
     return this.writeChain
   }
 }

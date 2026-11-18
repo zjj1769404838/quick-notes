@@ -228,11 +228,12 @@ export class NoteService {
       throw err
     }
     const st = await fs.stat(abs)
-    const { frontmatter, body } = splitFrontmatter(raw)
+    const { frontmatter, body, rawFrontmatter } = splitFrontmatter(raw)
     return {
       relPath,
       body,
       frontmatter,
+      rawFrontmatter,
       eol: detectEol(raw),
       mtimeMs: st.mtimeMs
     }

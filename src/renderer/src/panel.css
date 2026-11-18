@@ -906,3 +906,74 @@ input.ctl[type='range'] {
   background: var(--bg-hover);
   color: var(--text);
 }
+
+/* ---- 单栏模式：编辑/预览切换 Tab（默认 480px 必须可见，否则编辑器被隐藏后无从切换） ---- */
+.mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  flex: 0 0 auto;
+}
+
+.mode-tab {
+  padding: 4px 12px;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  background: transparent;
+  transition: background var(--d-fast) var(--ease), color var(--d-fast) var(--ease);
+}
+
+.mode-tab:hover {
+  background: var(--bg-hover);
+}
+
+.mode-tab[data-active='true'] {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.mode-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-meta);
+}
+
+/* ---- 编辑/预览容器：内部用 flex-basis 控制比例 ---- */
+.panes {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.body[data-layout='single'] .panes,
+.body[data-layout='vertical'] .panes {
+  flex-direction: column;
+}
+
+.body[data-layout='horizontal'] .panes {
+  flex-direction: row;
+}
+
+/* 分栏拖拽条在 .panes 内部，需要覆盖旧的 .splitter 定位 */
+.panes > .splitter {
+  flex: 0 0 4px;
+  background: var(--border);
+  opacity: 0.5;
+  transition: opacity var(--d-fast) var(--ease);
+}
+
+.panes > .splitter:hover {
+  opacity: 1;
+  background: var(--accent);
+}
+
+/* 搜索覆盖层不再需要给标题栏/状态栏让位（它挂在 .body 内部） */
+.search-overlay {
+  inset: 0;
+}

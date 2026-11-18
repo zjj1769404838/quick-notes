@@ -30,7 +30,7 @@ import {
   syntaxHighlighting,
   syntaxTree
 } from '@codemirror/language'
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import { markdown, markdownLanguage, markdownKeymap } from '@codemirror/lang-markdown'
 import {
   autocompletion,
   closeBrackets,
@@ -63,6 +63,8 @@ export interface EditorProps {
   /** 由外部触发重新定位到某行（大纲点击） */
   gotoLine?: { line: number; nonce: number } | null
   readOnly?: boolean
+  /** 变化时重建编辑器（用于「笔记就绪后才渲染 cm-host」的挂载时机） */
+  mountKey?: string | null
 }
 
 /* ============ 斜杠命令（FR-4.5 / 4.6） ============ */
@@ -330,7 +332,7 @@ void drawSelection
 void highlightActiveLineGutter
 void searchKeymap
 
-export function useCodeMirror({ initialValue, onChange, onCursor, onSave, onPasteImage, gotoLine, readOnly }: EditorProps): {
+export function useCodeMirror({ initialValue, onChange, onCursor, onSave, onPasteImage, gotoLine, readOnly, mountKey }: EditorProps): {
   hostRef: React.RefObject<HTMLDivElement | null>
   apiRef: React.MutableRefObject<EditorApi | null>
 } {
@@ -359,6 +361,9 @@ export function useCodeMirror({ initialValue, onChange, onCursor, onSave, onPast
       closeBrackets(),
       autocompletion({ override: [slashSource], activateOnTyping: true, maxRenderedOptions: 10 }),
       markdown({ base: markdownLanguage, addKeymap: false }),
+      // FR-4.1 列表自动续写：必须显式装上 markdownKeymap，
+      // 否则 markdown() 的 addKeymap:false 会让回车续写/空项退出列表全部失效。
+      keymap.of(markdownKeymap),
       syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       lintGutter(),
       structureLinter,
@@ -489,9 +494,10 @@ export function useCodeMirror({ initialValue, onChange, onCursor, onSave, onPast
       viewRef.current = null
       apiRef.current = null
     }
-    // 只在挂载时创建；readOnly 变化走下方独立 effect
+    // 依赖 mountKey：cm-host 只在有 current 笔记时渲染，
+    // 若只在首次挂载运行，hostRef 当时为 null 就永远不会创建编辑器。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [mountKey])
 
   // 外部跳转（大纲点击）
   useEffect(() => {

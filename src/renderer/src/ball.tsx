@@ -44,11 +44,9 @@ function Ball(): React.JSX.Element {
         void window.qn.window.panelShow()
         setState('hover')
       } else {
-        // 拖动结束 → 主进程负责吸边
+        // 拖动结束 → 由主进程执行吸边（把它吸附到最近的屏幕边缘）
         setState('idle')
-        void window.qn.window.ballSetPos(0, 0).then(() => {
-          // 触发一次吸边（占位调用，实际由主进程窗口事件处理）
-        })
+        void window.qn.window.ballSnap()
       }
     }
     window.addEventListener('mousemove', onMove)

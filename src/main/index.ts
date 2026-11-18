@@ -2,7 +2,7 @@
  * 主进程入口 —— 应用生命周期、单实例锁、托盘、全局热键、IPC 注册。
  * 负责把各 service 组装起来；不含业务逻辑本身。
  */
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, shell, Tray, dialog, clipboard } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray, dialog, clipboard } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
 import chokidar, { type FSWatcher } from 'chokidar'
@@ -31,6 +31,14 @@ const HIDDEN_START = process.argv.includes('--hidden')
 
 /** 单实例锁（FR-2.4） */
 bootLog('main module loaded, packaged=' + app.isPackaged + ' argv=' + process.argv.join(' '))
+
+// 进程级兜底：主进程异常必须留痕，否则用户只会看到「打不开」而日志空白
+process.on('uncaughtException', (e) => {
+  bootLog('uncaughtException: ' + (e?.stack ?? String(e)))
+})
+process.on('unhandledRejection', (e) => {
+  bootLog('unhandledRejection: ' + ((e as Error)?.stack ?? String(e)))
+})
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   bootLog('single-instance lock NOT acquired, quitting')
@@ -96,7 +104,9 @@ function startWatcher(): void {
   })
   const notify = (evt: string, rel: string): void => {
     winSvc.getPanel()?.webContents.send(IPC.evtFileChanged, { evt, relPath: rel })
-    void refreshIndexSoon()
+    // 目录级变化（增删目录）影响面不可精确推断 → 全量；文件级变化 → 增量
+    const isDirChange = evt === 'addDir' || evt === 'unlinkDir'
+    refreshIndexSoon(isDirChange ? undefined : rel, isDirChange)
   }
   const toRel = (abs: string): string => path.relative(root, abs).split(path.sep).join('/')
   watcher.on('add', (p) => notify('add', toRel(p)))
@@ -104,6 +114,10 @@ function startWatcher(): void {
   watcher.on('unlink', (p) => notify('unlink', toRel(p)))
   watcher.on('addDir', (p) => notify('addDir', toRel(p)))
   watcher.on('unlinkDir', (p) => notify('unlinkDir', toRel(p)))
+  // EventEmitter 的 error 事件若无监听会直接 throw 进主进程（UNC 路径/句柄耗尽/权限变更时触发）
+  watcher.on('error', (e) => {
+    bootLog('watcher error: ' + ((e as Error)?.message ?? String(e)))
+  })
 }
 
 function stopWatcher(): void {
@@ -113,13 +127,78 @@ function stopWatcher(): void {
   }
 }
 
+/** 退出前 flush 保存：等待渲染层回执，超时则放弃（不无限阻塞退出） */
+let flushResolve: (() => void) | null = null
+ipcMain.on(IPC.noteFlushDone, () => {
+  if (flushResolve) {
+    flushResolve()
+    flushResolve = null
+  }
+})
+function requestFlush(timeoutMs = 1500): Promise<void> {
+  const panel = winSvc?.getPanel?.()
+  if (!panel || panel.isDestroyed()) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    let done = false
+    flushResolve = () => {
+      if (done) return
+      done = true
+      resolve()
+    }
+    try {
+      panel.webContents.send(IPC.evtFlushSave)
+    } catch {
+      resolve()
+      return
+    }
+    setTimeout(() => {
+      if (!done) {
+        done = true
+        flushResolve = null
+        bootLog('flush timeout, quit anyway')
+        resolve()
+      }
+    }, timeoutMs)
+  })
+}
+
 let indexTimer: NodeJS.Timeout | null = null
-function refreshIndexSoon(): void {
+/** 待增量更新的单文件路径集合；为 null 表示需要全量扫描 */
+let pendingIncremental: Set<string> | null = new Set()
+
+/**
+ * 索引刷新调度。
+ *
+ * 性能要点（实测依据）：自动保存每 800ms 触发一次，watcher 会捕获到应用自己写的文件。
+ * 若每次都用 scanAll 全量重扫，1000 篇笔记会产生 600-900ms 的主进程 IO 尖峰，
+ * 且每次都全量 persist 索引（1.8MB 写盘 + fsync）。因此：
+ *   - 单文件变更 → 只读该文件并做增量 update
+ *   - 目录级变化/手动重建 → 走全量
+ */
+function refreshIndexSoon(relPath?: string, forceFull = false): void {
+  if (forceFull || !relPath) {
+    pendingIncremental = null
+  } else if (pendingIncremental) {
+    pendingIncremental.add(relPath)
+  }
   if (indexTimer) clearTimeout(indexTimer)
   indexTimer = setTimeout(() => {
     indexTimer = null
+    const inc = pendingIncremental
+    pendingIncremental = new Set()
     void (async () => {
       try {
+        if (inc && inc.size > 0 && inc.size <= 20) {
+          // 增量：只处理受影响的文件
+          const metas = await noteSvc.scanAll()
+          const wanted = new Set(inc)
+          const targets = metas.filter((m) => wanted.has(m.relPath))
+          if (targets.length > 0) {
+            await indexSvc.update(targets, async (rel) => (await noteSvc.read(rel)).body)
+            return
+          }
+        }
+        // 全量：目录结构变化或批量变更
         const metas = await noteSvc.scanAll()
         await indexSvc.update(metas, async (rel) => (await noteSvc.read(rel)).body)
       } catch {
@@ -185,7 +264,7 @@ async function newNoteAndShow(): Promise<void> {
     const { relPath } = await noteSvc.create()
     await winSvc.showPanel()
     winSvc.getPanel()?.webContents.send(IPC.evtToast, { level: 'info', text: '', route: 'open', relPath })
-    refreshIndexSoon()
+    refreshIndexSoon(relPath)
   } catch (e) {
     dialog.showErrorBox('无法新建笔记', (e as Error).message)
   }
@@ -199,6 +278,10 @@ function registerIpc(): void {
     return true
   })
   handle(IPC.ballGetPos, () => winSvc.getBall()?.getPosition() ?? [0, 0])
+  handle(IPC.ballSnap, () => {
+    winSvc.snapBall()
+    return true
+  })
   handle(IPC.panelShow, async () => {
     await winSvc.showPanel()
     return true
@@ -234,7 +317,8 @@ function registerIpc(): void {
   handle(IPC.noteRename, (rel: string, name: string) => noteSvc.rename(rel, name))
   handle(IPC.noteDelete, async (rel: string) => {
     await noteSvc.trash(rel)
-    refreshIndexSoon()
+    // 删除是「集合减少」，增量路径靠 update 的 removed 分支处理，这里传原路径即可
+    refreshIndexSoon(rel)
     return true
   })
   handle(IPC.noteRevealInExplorer, (rel: string) => {
@@ -337,7 +421,10 @@ function registerIpc(): void {
         /* 跳过读失败的文件 */
       }
     }
-    return semanticSvc.rebuild(notes, cfgNow.ai.tier === '1.5b' ? 'qwen2.5-1.5b' : 'qwen3-0.6b')
+    const progress = (done: number, total: number): void => {
+      winSvc.getPanel()?.webContents.send('semantic:progress', { done, total })
+    }
+    return semanticSvc.rebuild(notes, cfgNow.ai.tier === '1.5b' ? 'qwen2.5-1.5b' : 'qwen3-0.6b', progress)
   })
   handle('semantic:clear', async () => {
     await semanticSvc.clear()
@@ -496,14 +583,33 @@ app.whenReady().then(async () => {
       try {
         await noteSvc.ensureRoot()
         await indexSvc.load()
+        // 语义索引也要在启动时读回，否则重启后语义检索会静默失效
+        await semanticSvc.load()
         startWatcher()
         const metas = await noteSvc.scanAll()
         await indexSvc.update(metas, async (rel) => (await noteSvc.read(rel)).body)
-      } catch {
-        /* 索引失败不阻断启动 */
+      } catch (e) {
+        bootLog('idle init failed: ' + ((e as Error)?.message ?? String(e)))
       }
     })()
   }, 1500)
+
+  // 屏幕几何变化（拔插显示器 / 改缩放）：把球与面板拉回可见工作区
+  const onMetricsChanged = (): void => {
+    try {
+      winSvc.handleDisplayChange()
+    } catch (e) {
+      bootLog('handleDisplayChange failed: ' + ((e as Error)?.message ?? String(e)))
+    }
+  }
+  // 注：本版本 @types/electron 中 screen 的 EventEmitter 成员未被正确暴露，
+  // 运行时 screen.on 确实存在，这里用最小断言避免污染其余类型。
+  const screenEmitter = screen as unknown as {
+    on(event: string, listener: (...args: unknown[]) => void): void
+  }
+  screenEmitter.on('display-metrics-changed', onMetricsChanged)
+  screenEmitter.on('display-removed', onMetricsChanged)
+  screenEmitter.on('display-added', onMetricsChanged)
 
   if (!HIDDEN_START && !cfg.onboardingDone) {
     await winSvc.showPanel()
@@ -512,15 +618,35 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) winSvc.createBall()
   })
+}).catch((e) => {
+  // 启动期任一环节抛错都必须留痕并明确告知，避免「进程活着但没有窗口」的静默失败
+  bootLog('STARTUP FAILED: ' + ((e as Error)?.stack ?? String(e)))
+  try {
+    dialog.showErrorBox('随手笔记启动失败', (e as Error)?.message ?? String(e))
+  } catch {
+    /* 忽略 */
+  }
+  app.quit()
 })
 
 app.on('window-all-closed', () => {
   // 球与面板都关了也不退出：靠托盘常驻
 })
 
-app.on('before-quit', () => {
+let quitting = false
+app.on('before-quit', (event) => {
   globalShortcut.unregisterAll()
   stopWatcher()
+  // 退出前必须让渲染层把内存里的最新正文落盘。
+  // 防抖窗口（默认 800ms）内退出会让最后一笔输入丢失，且用户无从察觉。
+  if (quitting) return
+  const panel = winSvc?.getPanel?.()
+  if (!panel || panel.isDestroyed()) return
+  event.preventDefault()
+  quitting = true
+  void requestFlush(1500).finally(() => {
+    app.quit()
+  })
 })
 
 app.on('will-quit', () => {

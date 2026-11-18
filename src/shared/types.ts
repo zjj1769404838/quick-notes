@@ -75,6 +75,8 @@ export interface NoteContent {
   relPath: string
   body: string
   frontmatter: Record<string, unknown> | null
+  /** 原始 frontmatter 文本（含 --- 包裹）；保存时原样写回，避免丢自定义字段 */
+  rawFrontmatter: string | null
   /** 原文件的换行风格，保存时据此还原 */
   eol: 'lf' | 'crlf'
   mtimeMs: number
