@@ -460,6 +460,25 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [newNote, doSave, aiOpen, route])
 
+  // 标签过滤：原先 tagFilter 只是显示一个 chip，树完全没过滤（docs/05 §4 U2）
+  // 这里在索引里查出含该标签的路径集合，再交给树过滤。
+  const [tagPaths, setTagPaths] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    if (!tagFilter) {
+      setTagPaths(null)
+      return
+    }
+    void (async () => {
+      const r = await window.qn.search.query(tagFilter, 500)
+      if (!r.ok) return
+      const set = new Set<string>()
+      for (const h of r.data.lexical) {
+        if (h.tags.some((t) => t.toLowerCase() === tagFilter.toLowerCase())) set.add(h.relPath)
+      }
+      setTagPaths(set)
+    })()
+  }, [tagFilter])
+
   // 冷启动不该回到空白：把最近打开的一篇摆在最显眼处（docs/05 §4 U3）
   const recentList = useMemo(() => {
     const list = (cfg?.recent ?? []).filter((r) => r && r.path)
@@ -556,7 +575,7 @@ export function App(): React.JSX.Element {
             {tagFilter && (
               <div style={{ padding: '0 8px 6px' }}>
                 <button className="tag-chip" data-active="true" onClick={() => setTagFilter(null)}>
-                  #{tagFilter} ×
+                  {'#' + tagFilter + (tagPaths ? ' · ' + tagPaths.size + ' 篇' : '') + ' ×'}
                 </button>
               </div>
             )}
@@ -566,6 +585,7 @@ export function App(): React.JSX.Element {
                   node={tree}
                   selected={current?.relPath ?? null}
                   tagFilter={tagFilter}
+                  allowedPaths={tagPaths}
                   onOpen={(rel) => void openNote(rel)}
                   onDelete={(rel) => void deleteNote(rel)}
                   onRename={(rel, name) => void renameNote(rel, name)}

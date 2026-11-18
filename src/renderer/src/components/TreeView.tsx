@@ -1,4 +1,3 @@
-/** 目录树 —— 折叠/展开、选中、重命名、删除、按标签过滤 */
 import React, { useMemo, useState } from 'react'
 import type { DirNode } from '../../../shared/types.js'
 
@@ -6,13 +5,22 @@ interface Props {
   node: DirNode
   selected: string | null
   tagFilter: string | null
-  tagMap?: Map<string, string[]>
+  /** 当前标签命中的路径集合；null = 不过滤。用于让标签筛选真的生效（docs/05 §4 U2） */
+  allowedPaths?: Set<string> | null
   onOpen: (relPath: string) => void
   onDelete: (relPath: string) => void
   onRename: (relPath: string, oldName: string) => void
 }
 
-export function TreeView({ node, selected, tagFilter, onOpen, onDelete, onRename }: Props): React.JSX.Element {
+export function TreeView({
+  node,
+  selected,
+  tagFilter,
+  allowedPaths,
+  onOpen,
+  onDelete,
+  onRename
+}: Props): React.JSX.Element {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
 
   const toggle = (rel: string): void => {
@@ -24,10 +32,26 @@ export function TreeView({ node, selected, tagFilter, onOpen, onDelete, onRename
     })
   }
 
+  /** 过滤：保留命中文件，以及含有命中文件的目录 */
+  const prune = (n: DirNode): DirNode | null => {
+    if (n.type === 'file') {
+      if (!allowedPaths) return n
+      return allowedPaths.has(n.relPath) ? n : null
+    }
+    const kids: DirNode[] = []
+    for (const c of n.children ?? []) {
+      const p = prune(c)
+      if (p) kids.push(p)
+    }
+    // 有过滤时，空目录不显示（避免一堆展开后还是空的目录）
+    if (allowedPaths && kids.length === 0 && n.relPath !== '') return null
+    return { ...n, children: kids }
+  }
+
+  const visible = useMemo(() => prune(node) ?? { ...node, children: [] }, [node, allowedPaths])
+
   const renderNode = (n: DirNode, depth: number): React.ReactNode => {
     if (n.type === 'file') {
-      // 标签过滤时不隐藏文件（标签过滤在搜索面板做），这里保持完整树
-      void tagFilter
       const isSel = selected === n.relPath
       return (
         <div
@@ -47,7 +71,7 @@ export function TreeView({ node, selected, tagFilter, onOpen, onDelete, onRename
             if (e.key === 'Delete') onDelete(n.relPath)
           }}
         >
-          <span className="label">{n.name}</span>
+          <span className="label">{n.name.replace(/\.md$/i, '')}</span>
           <button
             className="del"
             title="移到回收站"
@@ -63,8 +87,8 @@ export function TreeView({ node, selected, tagFilter, onOpen, onDelete, onRename
     }
 
     const isCollapsed = collapsed.has(n.relPath)
-    const hasChildren = (n.children?.length ?? 0) > 0
-    if (depth > 0 && !hasChildren) return null
+    const children = n.children ?? []
+    if (depth > 0 && children.length === 0) return null
 
     return (
       <div key={n.relPath || 'root'} role="group">
@@ -82,17 +106,27 @@ export function TreeView({ node, selected, tagFilter, onOpen, onDelete, onRename
             <span className="label">{n.name}</span>
           </div>
         )}
-        {!isCollapsed &&
-          (n.children ?? []).map((c) => renderNode(c, depth === 0 ? 0 : depth + 1))}
+        {!isCollapsed && children.map((c) => renderNode(c, depth === 0 ? 0 : depth + 1))}
       </div>
     )
   }
 
-  const content = useMemo(() => renderNode(node, 0), [node, selected, collapsed, tagFilter])
+  // 依赖里带上回调与 filter，避免切笔记后仍按旧的闭包判定（原实现漏了）
+  const content = useMemo(
+    () => renderNode(visible, 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, selected, collapsed, tagFilter, allowedPaths, onOpen, onDelete, onRename]
+  )
+
+  const empty = allowedPaths && (visible.children?.length ?? 0) === 0
 
   return (
     <div role="tree" aria-label="笔记目录">
-      {content}
+      {empty ? (
+        <div className="tree-empty">{tagFilter ? '没有含该标签的笔记' : '这个目录还没有笔记'}</div>
+      ) : (
+        content
+      )}
     </div>
   )
 }
