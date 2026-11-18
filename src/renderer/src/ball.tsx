@@ -66,8 +66,9 @@ function Ball(): React.JSX.Element {
     <div className="ball-wrap" data-state={state}>
       <button
         className="ball"
-        title="随手笔记（左键展开，右键菜单，可拖动）"
         onMouseDown={onMouseDown}
+        onDoubleClick={() => void window.qn.window.openMain()}
+        title="单击快速捕捉 · 双击打开主面板 · 可拖动"
         onMouseEnter={() => setState((s) => (s === 'idle' ? 'hover' : s))}
         onMouseLeave={() => setState((s) => (s === 'hover' || s === 'press' ? 'idle' : s))}
         onContextMenu={onContextMenu}

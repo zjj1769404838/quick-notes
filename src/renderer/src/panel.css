@@ -977,3 +977,82 @@ input.ctl[type='range'] {
 .search-overlay {
   inset: 0;
 }
+
+/* ---- 内联对话框：替代原生 confirm/prompt，保持窗口焦点不失（docs/05 §4 U1） ---- */
+.dlg-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(16, 24, 40, 0.42);
+  display: grid;
+  place-items: center;
+  z-index: 200;
+  padding: 16px;
+  animation: dlg-fade var(--d-fast, 120ms) var(--ease, ease);
+}
+
+@keyframes dlg-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dlg {
+  width: min(340px, 100%);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-panel);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dlg-title {
+  font-size: 14.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.dlg-detail {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.dlg-input {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.dlg-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.dlg-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* 破坏性操作按钮 */
+.btn.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn.danger:hover {
+  filter: brightness(1.08);
+}

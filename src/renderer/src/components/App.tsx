@@ -8,6 +8,7 @@ import { SearchPanel } from './SearchPanel'
 import { SettingsPanel } from './SettingsPanel'
 import { AiPanel } from './AiPanel'
 import { Onboarding } from './Onboarding'
+import { InlineDialog, type ConfirmOptions, type PromptOptions } from './InlineDialog'
 
 type Layout = 'single' | 'vertical' | 'horizontal'
 type SaveState = 'saved' | 'saving' | 'unsaved'
@@ -38,6 +39,41 @@ export function App(): React.JSX.Element {
   const [aiOpen, setAiOpen] = useState(false)
   const [previewHtml, setPreviewHtml] = useState('')
   const [tagFilter, setTagFilter] = useState<string | null>(null)
+  const [dialog, setDialog] = useState<
+    | { mode: 'confirm'; options: ConfirmOptions; resolve: (v: boolean) => void }
+    | { mode: 'prompt'; options: PromptOptions; resolve: (v: string | null) => void }
+    | null
+  >(null)
+  // 内联对话框：替代原生 confirm/prompt，避免面板失焦被收起（docs/05 §4 U1）
+  const askConfirm = useCallback((options: ConfirmOptions): Promise<boolean> => {
+    return new Promise<boolean>((resolve) => {
+      // 弹窗期间锁住「失焦收起」，否则用户点按钮时面板会消失
+      window.qn.window.setUnsaved(true)
+      setDialog({
+        mode: 'confirm',
+        options,
+        resolve: (v) => {
+          window.qn.window.setUnsaved(false)
+          setDialog(null)
+          resolve(v)
+        }
+      })
+    })
+  }, [])
+  const askPrompt = useCallback((options: PromptOptions): Promise<string | null> => {
+    return new Promise<string | null>((resolve) => {
+      window.qn.window.setUnsaved(true)
+      setDialog({
+        mode: 'prompt',
+        options,
+        resolve: (v) => {
+          window.qn.window.setUnsaved(false)
+          setDialog(null)
+          resolve(v)
+        }
+      })
+    })
+  }, [])
 
   const saveTimer = useRef<number | null>(null)
   // 编辑器实例 ref 之外再留一份最新正文，供无法访问编辑器时的兜底保存使用
@@ -343,7 +379,13 @@ export function App(): React.JSX.Element {
   /* ---- 删除 ---- */
   const deleteNote = useCallback(
     async (rel: string) => {
-      if (!window.confirm(`确定把「${rel}」移到回收站吗？\n（可在笔记目录的 .trash 里找回）`)) return
+      const okDel = await askConfirm({
+        title: '移到回收站？',
+        detail: `「${rel}」会被移到笔记目录的 .trash 下，之后可以在那里找回。`,
+        confirmText: '移到回收站',
+        tone: 'danger'
+      })
+      if (!okDel) return
       const r = await window.qn.notes.delete(rel)
       if (!r.ok) {
         pushToast('error', `删除失败：${r.error.message}`)
@@ -357,13 +399,18 @@ export function App(): React.JSX.Element {
       const t = await window.qn.notes.listTree()
       if (t.ok) setTree(t.data)
     },
-    [current?.relPath, pushToast]
+    [current?.relPath, pushToast, askConfirm]
   )
 
   /* ---- 重命名 ---- */
   const renameNote = useCallback(
     async (rel: string, oldName: string) => {
-      const next = window.prompt('新的笔记名称（不需要 .md）', oldName)
+      const next = await askPrompt({
+        title: '重命名',
+        detail: '不需要输入 .md 后缀',
+        defaultValue: oldName,
+        confirmText: '重命名'
+      })
       if (!next || next === oldName) return
       const r = await window.qn.notes.rename(rel, next)
       if (!r.ok) {
@@ -376,7 +423,7 @@ export function App(): React.JSX.Element {
         setCurrent({ ...current, relPath: r.data.relPath })
       }
     },
-    [current, pushToast]
+    [current, pushToast, askPrompt]
   )
 
   /* ---- 快捷键 ---- */
@@ -636,6 +683,17 @@ export function App(): React.JSX.Element {
           {rootPath}
         </span>
       </div>
+
+      {dialog && (
+        <InlineDialog
+          mode={dialog.mode}
+          options={dialog.options}
+          onResolve={(v) => {
+            if (dialog.mode === 'confirm') dialog.resolve(v === true)
+            else dialog.resolve(typeof v === 'string' ? v : null)
+          }}
+        />
+      )}
 
       <div className="toasts">
         {toasts.map((t) => (
