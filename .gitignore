@@ -22,3 +22,9 @@ build/icon.svg
 # 打包产物目录（不入库）
 release-final/
 release/
+
+# Windows 保留设备名（echo 重定向误建）
+CON
+PRN
+AUX
+NUL
