@@ -1,6 +1,6 @@
 {
   "name": "quick-notes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "随手笔记 - 桌面悬浮球 Markdown 速记工具",
   "main": "./out/main/index.cjs",
   "author": "local",

@@ -39,6 +39,7 @@ const api = {
     ballSetPos: (x: number, y: number) => invoke<boolean>(IPC.ballSetPos, x, y),
     ballGetPos: () => invoke<[number, number]>(IPC.ballGetPos),
     ballSnap: () => invoke<boolean>(IPC.ballSnap),
+    resetBall: () => invoke<boolean>('ball:reset'),
     panelShow: () => invoke<boolean>(IPC.panelShow),
     openMain: () => invoke<boolean>('panel:openMain'),
     newInMain: () => invoke<boolean>('note:newInMain'),

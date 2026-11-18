@@ -285,6 +285,16 @@ export class WindowService {
     void this.cfgSvc.patch({ ball: { ...this.cfgSvc.current().ball, x: nx, y: ny } })
   }
 
+  /** 把球放回主屏右边缘垂直居中（用户拖丢时的救命入口，docs/05 §4 U11） */
+  resetBallPosition(): void {
+    if (!this.ball || this.ball.isDestroyed()) return
+    const wa = screen.getPrimaryDisplay().workArea
+    const nx = wa.x + wa.width - BALL_SIZE - EDGE_MARGIN
+    const ny = wa.y + Math.round((wa.height - BALL_SIZE) / 2)
+    this.ball.setPosition(nx, ny)
+    void this.cfgSvc.patch({ ball: { ...this.cfgSvc.current().ball, x: nx, y: ny } })
+  }
+
   /** 屏幕几何变化（拔插显示器 / 改缩放）后修复球与面板位置 */
   handleDisplayChange(): void {
     if (this.ball && !this.ball.isDestroyed()) {

@@ -236,6 +236,13 @@ function buildTray(): void {
       click: () => void winSvc.showPanel()
     },
     {
+      label: '重置悬浮球位置',
+      click: () => {
+        winSvc.resetBallPosition()
+        winSvc.getPanel()?.webContents.send(IPC.evtToast, { level: 'info', text: '悬浮球已回到屏幕右边缘' })
+      }
+    },
+    {
       label: '显示 / 隐藏面板',
       click: () => winSvc.togglePanel()
     },
@@ -284,6 +291,10 @@ function registerIpc(): void {
     return true
   })
   handle(IPC.ballGetPos, () => winSvc.getBall()?.getPosition() ?? [0, 0])
+  handle('ball:reset', () => {
+    winSvc.resetBallPosition()
+    return true
+  })
   handle(IPC.ballSnap, () => {
     winSvc.snapBall()
     return true
