@@ -219,6 +219,8 @@ export function App(): React.JSX.Element {
       unsavedRef.current = false
       window.qn.window.setUnsaved(false)
       setRoute('note')
+      // 打开后聚焦编辑器，否则用户直接打字会丢（docs/05 §4 U4）
+      window.setTimeout(() => apiRef.current?.focus(), 80)
       void window.qn.config.patch({
         recent: [
           { path: rel, openedAt: new Date().toISOString() },
@@ -458,6 +460,34 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey)
   }, [newNote, doSave, aiOpen, route])
 
+  // 冷启动不该回到空白：把最近打开的一篇摆在最显眼处（docs/05 §4 U3）
+  const recentList = useMemo(() => {
+    const list = (cfg?.recent ?? []).filter((r) => r && r.path)
+    return list.slice(0, 5)
+  }, [cfg?.recent])
+  const prettyName = (rel: string): string =>
+    rel.replace(/\.md$/i, '').split('/').pop() ?? rel
+  const prettyTime = (iso: string): string => {
+    try {
+      const d = new Date(iso)
+      const now = new Date()
+      const sameDay = d.toDateString() === now.toDateString()
+      const p2 = (n: number): string => String(n).padStart(2, "0")
+      return sameDay
+        ? `${p2(d.getHours())}:${p2(d.getMinutes())}`
+        : `${d.getMonth() + 1}/${d.getDate()}`
+    } catch {
+      return ""
+    }
+  }
+  // 打开最近项：路径可能已不存在，失败要能提示而不是静默
+  const openItem = useCallback(
+    async (rel: string) => {
+      await openNote(rel)
+    },
+    [openNote]
+  )
+
   const outline = useMemo(() => extractOutline(body), [body])
   const stats = useMemo(() => countWords(body), [body])
   const rootPath = cfg?.noteRoot ?? ''
@@ -620,11 +650,42 @@ export function App(): React.JSX.Element {
             </>
           ) : (
             <div className="empty">
-              <h2>开始记录</h2>
-              <p>点左上角「＋」新建一篇，或按 Ctrl+N。笔记存成纯 .md 文件，随时能用别的编辑器打开。</p>
-              <button className="btn" onClick={() => void newNote()}>
-                ＋ 新建笔记
-              </button>
+              {recentList.length > 0 ? (
+                <>
+                  <h2>继续上次</h2>
+                  <p>接着上次没写完的那篇，或新建一篇。</p>
+                  <div className="recent-list">
+                    {recentList.slice(0, 5).map((r, i) => (
+                      <button
+                        key={r.path}
+                        className={"recent-item" + (i === 0 ? " primary" : "")}
+                        onClick={() => void openItem(r.path)}
+                        title={r.path}
+                      >
+                        <span className="recent-name">{prettyName(r.path)}</span>
+                        <span className="recent-time">{prettyTime(r.openedAt)}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="empty-actions">
+                    <button className="btn" onClick={() => void newNote()}>
+                      ＋ 新建笔记
+                    </button>
+                    <span className="empty-hint">或按 Ctrl+N</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2>写下第一条</h2>
+                  <p>
+                    笔记会存成普通 .md 文件，放在你自己的目录里，随时能用别的编辑器打开。
+                  </p>
+                  <button className="btn" onClick={() => void newNote()}>
+                    ＋ 新建笔记
+                  </button>
+                  <span className="empty-hint">或按 Ctrl+Alt+N 快速捕捉</span>
+                </>
+              )}
             </div>
           )}
         </div>

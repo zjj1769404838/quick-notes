@@ -1056,3 +1056,75 @@ input.ctl[type='range'] {
 .btn.danger:hover {
   filter: brightness(1.08);
 }
+
+/* ---- 空状态：继续上次 + 最近列表（docs/05 §4 U3） ---- */
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 320px;
+  margin: 2px 0 4px;
+}
+
+.recent-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--d-fast) var(--ease),
+    border-color var(--d-fast) var(--ease);
+}
+
+.recent-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.recent-item.primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.recent-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-item.primary .recent-time {
+  color: var(--accent-text);
+  opacity: 0.75;
+}
+
+.empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.empty-hint {
+  font-size: 11.5px;
+  color: var(--text-meta);
+}
